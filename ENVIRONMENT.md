@@ -11,15 +11,16 @@ connecter l'interface et les routes API Next.js à la base de données et au
 worker.
 
 ```env
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://192.168.1.4:3000
 DATABASE_URL=postgresql://renderstudio:renderstudio@127.0.0.1:5433/renderstudio
 WORKER_BASE_URL=http://127.0.0.1:8000
 WORKER_PUBLIC_URL=http://127.0.0.1:8000
 ```
 
-- `NEXT_PUBLIC_APP_URL`: canonical public site origin. Set it to the deployed
-  production domain; it supplies absolute URLs for `robots.txt`, `sitemap.xml`,
-  and social metadata.
+- `NEXT_PUBLIC_APP_URL`: canonical public site origin. Set it to an address
+  reachable by the browser (for LAN access, use the host's LAN IP instead of
+  `localhost`); it supplies absolute URLs for auth redirects, billing, and
+  site metadata.
 - `DATABASE_URL` : Postgres partagée avec le worker.
 - `WORKER_BASE_URL` : URL interne utilisée par les routes serveur Next.js
   pour appeler le worker (génération, upscaling, stockage).
