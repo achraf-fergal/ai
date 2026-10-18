@@ -197,6 +197,10 @@ def generate(input_: dict[str, Any]) -> dict[str, Any]:
         if not response.content:
             raise ProviderError("cartesia returned an empty audio file")
         mime_type = response.headers.get("content-type", "audio/wav").split(";", 1)[0].strip().lower()
+        # Some deployments return generic octet-stream for raw bytes. We
+        # requested WAV explicitly, so it is safe to normalize that header.
+        if mime_type == "application/octet-stream":
+            mime_type = "audio/wav"
         if mime_type not in {"audio/wav", "audio/wave", "audio/x-wav"}:
             raise ProviderError(f"cartesia returned unsupported audio type: {mime_type}")
         return {
