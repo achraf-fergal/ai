@@ -65,6 +65,7 @@ def is_configured() -> bool:
 _FREE_MONTHLY_CREDIT_CAP = 10_000
 _FREE_USAGE_LOCK = threading.Lock()
 _FREE_USAGE_LAST_SERVER_COUNT: int | None = None
+_FREE_USAGE_RESET_UNIX: int | None = None
 _FREE_USAGE_RESERVED = 0
 _FREE_USAGE_RESERVED_CHARACTERS = 0
 _FREE_USAGE_RESERVED_OTHER = 0
@@ -77,7 +78,7 @@ def _reserve_free_credits(estimated_credits: int, *, character_metered: bool = T
     after the provider has started billing. The remote subscription count is
     reconciled with local reservations on each call.
     """
-    global _FREE_USAGE_LAST_SERVER_COUNT, _FREE_USAGE_RESERVED
+    global _FREE_USAGE_LAST_SERVER_COUNT, _FREE_USAGE_RESET_UNIX, _FREE_USAGE_RESERVED
     global _FREE_USAGE_RESERVED_CHARACTERS, _FREE_USAGE_RESERVED_OTHER
     if estimated_credits < 1:
         raise ProviderError("elevenlabs: invalid free quota estimate")
@@ -120,6 +121,19 @@ def _reserve_free_credits(estimated_credits: int, *, character_metered: bool = T
     count, limit = data.get("character_count"), data.get("character_limit")
     if isinstance(count, bool) or not isinstance(count, int) or isinstance(limit, bool) or not isinstance(limit, int):
         raise ProviderError("ElevenLabs Free quota response was incomplete; generation blocked")
+    reset_unix = data.get("next_character_count_reset_unix")
+    if reset_unix is not None and (isinstance(reset_unix, bool) or not isinstance(reset_unix, int)):
+        raise ProviderError("ElevenLabs quota reset timestamp was invalid; generation blocked")
+
+    # Clear local pending reservations when the provider's billing cycle turns
+    # over—even when sound-effect requests never change character_count.
+    if _FREE_USAGE_RESET_UNIX is not None and time.time() >= _FREE_USAGE_RESET_UNIX:
+        _FREE_USAGE_LAST_SERVER_COUNT = None
+        _FREE_USAGE_RESERVED = 0
+        _FREE_USAGE_RESERVED_CHARACTERS = 0
+        _FREE_USAGE_RESERVED_OTHER = 0
+    if reset_unix is not None:
+        _FREE_USAGE_RESET_UNIX = reset_unix
     try:
         configured_cap = int(os.environ.get("ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT", str(_FREE_MONTHLY_CREDIT_CAP)))
     except ValueError as err:
