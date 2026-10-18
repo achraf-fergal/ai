@@ -106,7 +106,7 @@ def run(job: dict) -> None:
                     conn,
                     job,
                     asset_id,
-                    int(input_.get("creditCost") or 0),
+                    0,  # Local Free-only mode never debits application credits.
                     model_used=result.get("model"),
                     provider_cost_cents=int(result.get("provider_cost_cents") or 0),
                 )
