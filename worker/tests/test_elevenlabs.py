@@ -93,11 +93,13 @@ class ElevenLabsFreeQuotaTests(unittest.TestCase):
     def setUp(self):
         self.old_state = (
             elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESET_UNIX,
             elevenlabs._FREE_USAGE_RESERVED,
             elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
             elevenlabs._FREE_USAGE_RESERVED_OTHER,
         )
         elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = None
+        elevenlabs._FREE_USAGE_RESET_UNIX = None
         elevenlabs._FREE_USAGE_RESERVED = 0
         elevenlabs._FREE_USAGE_RESERVED_CHARACTERS = 0
         elevenlabs._FREE_USAGE_RESERVED_OTHER = 0
@@ -105,6 +107,7 @@ class ElevenLabsFreeQuotaTests(unittest.TestCase):
     def tearDown(self):
         (
             elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESET_UNIX,
             elevenlabs._FREE_USAGE_RESERVED,
             elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
             elevenlabs._FREE_USAGE_RESERVED_OTHER,
@@ -120,6 +123,7 @@ class ElevenLabsFreeQuotaTests(unittest.TestCase):
             "has_open_invoices": False,
             "character_count": 10,
             "character_limit": 10000,
+            "next_character_count_reset_unix": 4_102_444_800,
         }
         data.update(overrides)
         return httpx.Response(
