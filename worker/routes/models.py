@@ -1,24 +1,48 @@
-"""Exposition des modèles disponibles pour le sélecteur UI.
-
-Chaque feature (image/vidéo/upscale/audio) renvoie la liste des candidats
-ou capacités configurés, avec key/name/description — le client n'affiche
-QUE ces champs ; model_id et API restent internes au worker.
-"""
+"""Expose safe, configured provider and model choices to the Audio Studio."""
 from fastapi import APIRouter, HTTPException
 
 from catalog import list_feature_models
-from providers import elevenlabs, upscale
+from providers import cartesia, elevenlabs, upscale
 
 router = APIRouter()
 
 
+def _audio_provider_catalog() -> dict:
+    cartesia_ready = cartesia.is_configured()
+    elevenlabs_ready = elevenlabs.is_configured()
+    return {
+        "cartesia": {
+            "configured": cartesia_ready,
+            "voices": cartesia.list_voices() if cartesia_ready else [],
+        },
+        "elevenlabs": {
+            "configured": elevenlabs_ready,
+            "voices": elevenlabs.list_voices() if elevenlabs_ready else [],
+        },
+        "soundEffects": {
+            "configured": elevenlabs_ready,
+            "provider": "elevenlabs",
+            "maxDurationSeconds": 30,
+        },
+        "musicLoops": {
+            "configured": elevenlabs_ready,
+            "provider": "elevenlabs",
+            "maxDurationSeconds": 30,
+            "description": "Short musical elements or loops via the sound-generation API; not full-length Music API tracks.",
+        },
+        "fullMusic": {
+            "configured": False,
+            "provider": None,
+            "description": "Full-length music generation APIs are disabled in free-only mode.",
+        },
+    }
+
+
 @router.get("/models")
 def list_models() -> dict:
-    """Retourne les modèles image, vidéo, upscale et audio disponibles côté worker.
-
-    `costPerGeneration` (centimes USD réels provider) est inclus pour que le
-    front puisse estimer le coût crédits d'un modèle choisi manuellement.
-    """
+    """List configured models; audio APIs are visible only in explicit Free mode."""
+    audio_catalog = _audio_provider_catalog()
+    # Keep the legacy audio array compatible with the existing Voice Generator.
     return {
         "image": list_feature_models("print_render", include_costs=True),
         "background_remover": list_feature_models("background_remover", include_costs=True),
@@ -28,21 +52,22 @@ def list_models() -> dict:
             + list_feature_models("video_relight", include_costs=True)
         ),
         "upscale": upscale.list_models(),
-        "audio": elevenlabs.list_voices() if elevenlabs.is_configured() else [],
+        "audio": audio_catalog["elevenlabs"]["voices"],
+        "audioProviders": audio_catalog,
         "threed": list_feature_models("3d_generator", include_costs=True),
     }
 
 
 @router.get("/models/{feature}")
 def list_feature(feature: str) -> list[dict]:
-    """Liste les modèles/capacités d'une feature spécifique."""
+    """List one feature's models."""
     if feature not in {
         "print_render",
         "mood_swap",
         "exterior_to_interior",
         "plan_to_render",
-        "multi_angle",
         "image_extender",
+        "multi_angle",
         "variations",
         "background_remover",
         "text_to_image",
@@ -58,5 +83,5 @@ def list_feature(feature: str) -> list[dict]:
     if feature == "upscale":
         return upscale.list_models()
     if feature == "audio":
-        return elevenlabs.list_voices() if elevenlabs.is_configured() else []
+        return _audio_provider_catalog()["elevenlabs"]["voices"]
     return list_feature_models(feature, include_costs=True)
