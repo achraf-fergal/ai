@@ -1276,7 +1276,7 @@ Omar: What happened?`}
                   </span>
 
                   <span className="font-medium">
-                    "0 credits (Free-tier API quota)"
+                    0 credits (Free-tier API quota)
                   </span>
                 </div>
 
