@@ -11,7 +11,7 @@ fichiers stockés via storage.py) :
 """
 import os
 
-from providers import bfl, cartesia, comfyui, elevenlabs, google, hunyuan3d, kling, magichour, meshy, openai, removebg, runway, trellis, tripo
+from providers import bfl, comfyui, elevenlabs, google, hunyuan3d, kling, magichour, meshy, openai, removebg, runway, trellis, tripo
 PROVIDERS = {
     "bfl": bfl,
     "google": google,
