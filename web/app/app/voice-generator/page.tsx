@@ -229,15 +229,6 @@ export default function VoiceGeneratorPage() {
     void refreshBalance();
   }, [refreshBalance]);
 
-  /*
-   * ---------------------------------------------------------
-   * Cost
-   * ---------------------------------------------------------
-   */
-
-  // Audio providers are free-tier-only in this branch; app credits are not charged.
-  const cost = 0;
-
   const dialogueLength = turns.reduce(
     (sum, turn) =>
       sum +
@@ -262,8 +253,6 @@ export default function VoiceGeneratorPage() {
         ),
     ) &&
     dialogueLength <= MAX_DIALOGUE_CHARACTERS;
-
-  const hasEnoughCredits = true;
 
   /*
    * ---------------------------------------------------------
@@ -509,8 +498,6 @@ export default function VoiceGeneratorPage() {
     if (
       isBusy ||
       dialogueJobId ||
-      !hasEnoughCredits ||
-      cost === null
     ) {
       return;
     }
@@ -1288,8 +1275,6 @@ Omar: What happened?`}
                   disabled={
                     isBusy ||
                     dialogueJobId !== null ||
-                    cost === null ||
-                    !hasEnoughCredits ||
                     (mode === "single"
                       ? !text.trim()
                       : !dialogueValid)
