@@ -20,7 +20,6 @@ PROVIDERS = {
     "openai": openai,
     "magichour": magichour,
     "elevenlabs": elevenlabs,
-    "cartesia": cartesia,
     "removebg": removebg,
     "meshy": meshy,
     "tripo": tripo,
