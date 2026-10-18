@@ -34,6 +34,7 @@ interface AudioProviderCatalog {
 
 const POLL_INTERVAL_MS = 2500;
 const MAX_POLL_ATTEMPTS = 120;
+const MAX_TEXT_LENGTH = 5000;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
