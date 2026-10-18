@@ -11,7 +11,7 @@ fichiers stockés via storage.py) :
 """
 import os
 
-from providers import bfl, comfyui, elevenlabs, google, hunyuan3d, kling, magichour, meshy, openai, removebg, runway, trellis, tripo
+from providers import bfl, cartesia, comfyui, elevenlabs, google, hunyuan3d, kling, magichour, meshy, openai, removebg, runway, trellis, tripo
 PROVIDERS = {
     "bfl": bfl,
     "google": google,
@@ -20,6 +20,7 @@ PROVIDERS = {
     "openai": openai,
     "magichour": magichour,
     "elevenlabs": elevenlabs,
+    "cartesia": cartesia,
     "removebg": removebg,
     "meshy": meshy,
     "tripo": tripo,
@@ -36,7 +37,8 @@ PROVIDER_ENV_KEYS = {
     "runway": [["RUNWAY_API_KEY"]],
     "openai": [["OPENAI_API_KEY"]],
     "magichour": [["MAGIC_HOUR_API_KEY"]],
-    "elevenlabs": [["ELEVENLABS_API_KEY"]],
+    "elevenlabs": [["ELEVENLABS_API_KEY", "AUDIO_FREE_ONLY", "ELEVENLABS_FREE_TIER_CONFIRMED"]],
+    "cartesia": [["CARTESIA_API_KEY", "CARTESIA_ADMIN_API_KEY", "AUDIO_FREE_ONLY", "CARTESIA_FREE_TIER_CONFIRMED"]],
     "removebg": [["REMOVEBG_API_KEY"]],
     "meshy": [["MESHY_API_KEY"]],
     "tripo": [["TRIPO_API_KEY"]],
