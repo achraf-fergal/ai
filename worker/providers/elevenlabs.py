@@ -124,6 +124,8 @@ def _reserve_free_credits(estimated_credits: int, *, character_metered: bool = T
     reset_unix = data.get("next_character_count_reset_unix")
     if reset_unix is not None and (isinstance(reset_unix, bool) or not isinstance(reset_unix, int)):
         raise ProviderError("ElevenLabs quota reset timestamp was invalid; generation blocked")
+    if reset_unix is not None and reset_unix <= int(time.time()):
+        raise ProviderError("ElevenLabs quota reset timestamp is stale; generation blocked")
 
     # Clear local pending reservations when the provider's billing cycle turns
     # over—even when sound-effect requests never change character_count.
