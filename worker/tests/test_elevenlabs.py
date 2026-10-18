@@ -188,6 +188,7 @@ class AudioWorkflowTests(unittest.TestCase):
         consume.assert_called_once_with(self.conn, "job-1")
         insert_asset.assert_called_once_with(self.conn, self.job, "audio", "/storage/a.mp3")
         complete.assert_called_once()
+        self.assertEqual(complete.call_args.args[3], 0)  # Free-only mode must not debit app credits.
         fail.assert_not_called()
         release.assert_not_called()
 
