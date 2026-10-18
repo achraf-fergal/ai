@@ -295,6 +295,9 @@ def generate(input_: dict[str, Any], timeout_s: int = 120) -> dict[str, Any]:
         timeout_s,
         estimated_credits=len(text.strip()),
     )
+    response_data["model"] = model
+    response_data["provider"] = "elevenlabs"
+    response_data["provider_cost_cents"] = 0
     return response_data
 
 
@@ -316,12 +319,16 @@ def generate_dialogue(input_: dict[str, Any]) -> dict[str, Any]:
         payload["seed"] = seed
 
     estimated_credits = sum(len(turn["text"]) for turn in inputs)
-    return _post_audio(
+    result = _post_audio(
         f"{_BASE}/text-to-dialogue",
         payload,
         "text-to-dialogue",
         estimated_credits=estimated_credits,
     )
+    result["model"] = DIALOGUE_MODEL
+    result["provider"] = "elevenlabs"
+    result["provider_cost_cents"] = 0
+    return result
 
 def generate_sound_effect(input_: dict[str, Any]) -> dict[str, Any]:
     """Generate a bounded-duration sound effect within the verified Free quota."""
@@ -349,6 +356,7 @@ def generate_sound_effect(input_: dict[str, Any]) -> dict[str, Any]:
         timeout_s=120,
         estimated_credits=estimate,
     )
+    result["model"] = "eleven_text_to_sound_v2"
     result["provider"] = "elevenlabs"
     result["provider_cost_cents"] = 0
     return result
