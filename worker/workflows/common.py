@@ -51,6 +51,10 @@ def _client_failure_message(err: Exception) -> str:
             "free quota could not be checked",
             "quota response was invalid",
             "free-tier settings",
+            "not on an active free tier",
+            "paid overage",
+            "overage is not explicitly disabled",
+            "free tier must be explicitly confirmed",
         )
     ):
         return "The provider's verified Free quota is exhausted or could not be checked. No paid fallback is permitted."
