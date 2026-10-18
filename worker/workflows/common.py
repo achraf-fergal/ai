@@ -46,6 +46,18 @@ def _client_failure_message(err: Exception) -> str:
     if any(
         marker in combined
         for marker in (
+            "free monthly allowance reached",
+            "free monthly audio allowance reached",
+            "free quota could not be checked",
+            "quota response was invalid",
+            "free-tier settings",
+        )
+    ):
+        return "The provider's verified Free quota is exhausted or could not be checked. No paid fallback is permitted."
+
+    if any(
+        marker in combined
+        for marker in (
             "insufficient_quota",
             "credit_balance_exhausted",
             "exceeded your current quota",
