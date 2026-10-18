@@ -44,6 +44,19 @@ Restart the FastAPI worker after changing `worker/.env`. Provider keys must stay
 
 These checks are fail-closed safeguards, not a substitute for reviewing billing settings on the provider account. Keep pay-as-you-go/overage disabled in provider dashboards. They also cannot prevent someone from using a provider key outside this application.
 
+## Offline regression tests
+
+Run these from the `worker` folder on Windows after installing the existing worker requirements:
+
+If your terminal is already in the repository root, use:
+
+```powershell
+cd worker
+.\\.venv\\Scripts\\python.exe -m unittest tests.test_cartesia tests.test_elevenlabs
+```
+
+These tests mock provider HTTP calls and should not consume API credits. The full Next.js production build should also be run from `web` after the repository's normal local environment variables are configured.
+
 ## Licensing limitations
 
 The Free plans are intended for evaluation/personal use and do not automatically include commercial-use rights. Review the current provider terms before using outputs in a commercial product or client work. Do not treat an audio provider as commercially licensed just because its API is available on a Free plan.
