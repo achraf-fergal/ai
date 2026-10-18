@@ -95,23 +95,22 @@ def _reserve_free_credits(estimated_credits: int) -> None:
         raise _provider_error(response, "free quota check")
     data = response.json()
 
-    if str(data.get("tier", "")).lower() != "free" or str(data.get("status", "")).lower() not in {"active", "trialing"}:
+    if str(data.get("tier", "")).lower() != "free" or str(data.get("status", "")).lower() != "active":
         raise ProviderError("ElevenLabs request blocked: account is not on an active Free tier")
     overage = data.get("current_overage")
-    if isinstance(overage, dict):
-        try:
-            if float(overage.get("amount", "0")) > 0:
-                raise ProviderError("ElevenLabs request blocked because the account reports paid overage")
-        except (TypeError, ValueError) as err:
-            raise ProviderError("ElevenLabs overage status could not be verified; generation blocked") from err
+    if not isinstance(overage, dict) or "amount" not in overage:
+        raise ProviderError("ElevenLabs overage status could not be verified; generation blocked")
+    try:
+        if float(overage["amount"]) > 0:
+            raise ProviderError("ElevenLabs request blocked because the account reports paid overage")
+    except (TypeError, ValueError) as err:
+        raise ProviderError("ElevenLabs overage status could not be verified; generation blocked") from err
 
     # Refuse accounts configured to extend their monthly allowance through
     # usage-based billing. Even a Free tier key must not be allowed to overage.
     extension = data.get("max_credit_limit_extension")
-    if data.get("can_extend_character_limit") is True or extension == "unlimited":
-        raise ProviderError("ElevenLabs request blocked: paid overage is enabled for this account")
-    if isinstance(extension, (int, float)) and not isinstance(extension, bool) and extension > 0:
-        raise ProviderError("ElevenLabs request blocked: paid overage is enabled for this account")
+    if data.get("can_extend_character_limit") is not False or extension not in (0, "0"):
+        raise ProviderError("ElevenLabs request blocked: paid overage is not explicitly disabled")
     if data.get("has_open_invoices") is True:
         raise ProviderError("ElevenLabs request blocked because the account has open invoices")
 
