@@ -17,6 +17,7 @@ export async function GET() {
       video?: unknown[];
       upscale?: unknown[];
       audio?: unknown[];
+      audioProviders?: Record<string, unknown>;
       threed?: Array<{
         key: string;
         name: string;
@@ -31,11 +32,15 @@ export async function GET() {
       video: Array.isArray(data.video) ? data.video : [],
       upscale: Array.isArray(data.upscale) ? data.upscale : [],
       audio: Array.isArray(data.audio) ? data.audio : [],
+      audioProviders:
+        data.audioProviders && typeof data.audioProviders === "object"
+          ? data.audioProviders
+          : {},
       threed: Array.isArray(data.threed) ? data.threed : [],
     });
   } catch (err) {
     if (err instanceof WorkerNotConfiguredError) {
-      return NextResponse.json({ image: [], video: [], upscale: [], audio: [], threed: [] }, { status: 503 });
+      return NextResponse.json({ image: [], video: [], upscale: [], audio: [], audioProviders: {}, threed: [] }, { status: 503 });
     }
     return NextResponse.json({ error: "Failed to load models." }, { status: 502 });
   }
