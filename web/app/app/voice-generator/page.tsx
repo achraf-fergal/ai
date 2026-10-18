@@ -497,7 +497,7 @@ export default function VoiceGeneratorPage() {
   const handleGenerate = async () => {
     if (
       isBusy ||
-      dialogueJobId ||
+      dialogueJobId
     ) {
       return;
     }
