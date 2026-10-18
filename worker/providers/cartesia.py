@@ -20,12 +20,16 @@ from providers.http_helpers import ProviderError, require_env
 
 _BASE = "https://api.cartesia.ai"
 _VERSION = os.environ.get("CARTESIA_VERSION", "2026-08-14")
+_USAGE_VERSION = "2026-03-01"
 DEFAULT_MODEL = "sonic-3.6"
 MAX_TEXT_LENGTH = 5000
 PUBLISHED_FREE_MONTHLY_CREDITS = 20_000
 _VOICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CLIENT = httpx.Client(timeout=httpx.Timeout(60.0), follow_redirects=False)
 _GENERATION_LOCK = threading.Lock()
+_LAST_USAGE_SNAPSHOT: int | None = None
+_PENDING_LOCAL_CREDITS = 0
+_PENDING_MONTH: str | None = None
 
 
 def _truthy(name: str) -> bool:
@@ -46,7 +50,7 @@ def _headers(*, admin: bool = False) -> dict[str, str]:
     key_name = "CARTESIA_ADMIN_API_KEY" if admin else "CARTESIA_API_KEY"
     return {
         "Authorization": f"Bearer {require_env(key_name)}",
-        "Cartesia-Version": _VERSION,
+        "Cartesia-Version": _USAGE_VERSION if admin else _VERSION,
     }
 
 
@@ -119,6 +123,9 @@ def _current_month_usage() -> int:
 
 
 def _assert_free_budget(estimated_credits: int) -> None:
+    global _LAST_USAGE_SNAPSHOT, _PENDING_LOCAL_CREDITS, _PENDING_MONTH
+    if estimated_credits < 1:
+        raise ProviderError("cartesia: invalid quota estimate")
     if not _truthy("AUDIO_FREE_ONLY"):
         raise ProviderError("audio generation is disabled unless AUDIO_FREE_ONLY=true")
     if not _truthy("CARTESIA_FREE_TIER_CONFIRMED"):
@@ -132,8 +139,21 @@ def _assert_free_budget(estimated_credits: int) -> None:
     # Never permit a configured cap above the published Free allowance.
     safe_limit = max(0, min(configured_limit, PUBLISHED_FREE_MONTHLY_CREDITS))
     used = _current_month_usage()
-    if used + estimated_credits > safe_limit:
+    month_key = datetime.now(timezone.utc).strftime("%Y-%m")
+    if _PENDING_MONTH != month_key:
+        _PENDING_MONTH = month_key
+        _LAST_USAGE_SNAPSHOT = None
+        _PENDING_LOCAL_CREDITS = 0
+    # The provider's usage endpoint may lag behind a just-completed request.
+    # Keep a conservative local reservation until server-side usage reflects it.
+    if _LAST_USAGE_SNAPSHOT is not None:
+        newly_reported = max(0, used - _LAST_USAGE_SNAPSHOT)
+        _PENDING_LOCAL_CREDITS = max(0, _PENDING_LOCAL_CREDITS - newly_reported)
+    _LAST_USAGE_SNAPSHOT = used
+    if used + _PENDING_LOCAL_CREDITS + estimated_credits > safe_limit:
         raise ProviderError("Cartesia Free monthly audio allowance reached; no generation request was sent")
+    # Reserve before issuing POST; a timeout can still represent billed work.
+    _PENDING_LOCAL_CREDITS += estimated_credits
 
 
 def generate(input_: dict[str, Any]) -> dict[str, Any]:
