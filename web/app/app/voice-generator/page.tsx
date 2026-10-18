@@ -12,11 +12,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  fetchCostsConfig,
-  computeDisplayCost,
-  type CostsConfig,
-} from "@/lib/config/action-costs";
 
 const POLL_INTERVAL_MS = 2500;
 const MAX_TEXT_LENGTH = 5000;
@@ -145,9 +140,6 @@ export default function VoiceGeneratorPage() {
   const [seed, setSeed] = useState("");
 
   const [voices, setVoices] = useState<VoiceOption[]>([]);
-  const [costsConfig, setCostsConfig] =
-    useState<CostsConfig | null>(null);
-
   const [balance, setBalance] =
     useState<number | null>(null);
 
@@ -213,10 +205,6 @@ export default function VoiceGeneratorPage() {
    */
 
   useEffect(() => {
-    fetchCostsConfig()
-      .then(setCostsConfig)
-      .catch(() => setCostsConfig(null));
-
     fetch("/api/models", {
       cache: "no-store",
     })
@@ -247,19 +235,8 @@ export default function VoiceGeneratorPage() {
    * ---------------------------------------------------------
    */
 
-  const feature =
-    mode === "single"
-      ? "voice_generator"
-      : "dialogue_generator";
-
-  const cost = costsConfig
-    ? computeDisplayCost(costsConfig, {
-        feature,
-        quality: "standard",
-        resolution: "1K",
-        quantity: 1,
-      })
-    : null;
+  // Audio providers are free-tier-only in this branch; app credits are not charged.
+  const cost = 0;
 
   const dialogueLength = turns.reduce(
     (sum, turn) =>
@@ -286,10 +263,7 @@ export default function VoiceGeneratorPage() {
     ) &&
     dialogueLength <= MAX_DIALOGUE_CHARACTERS;
 
-  const hasEnoughCredits =
-    balance === null ||
-    cost === null ||
-    balance >= cost;
+  const hasEnoughCredits = true;
 
   /*
    * ---------------------------------------------------------
@@ -1298,13 +1272,11 @@ Omar: What happened?`}
               <div className="flex flex-col gap-2 border-t pt-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Cost
+                    App credit cost
                   </span>
 
                   <span className="font-medium">
-                    {cost === null
-                      ? "Loading…"
-                      : `${cost} credits`}
+                    "0 credits (Free-tier API quota)"
                   </span>
                 </div>
 
