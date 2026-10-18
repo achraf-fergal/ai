@@ -231,9 +231,9 @@ export const TOOL_CATEGORIES: Array<{
   id: ToolCategory;
   label: string;
 }> = [
+  { id: "audio", label: "Audio" },
   { id: "image", label: "Image" },
   { id: "video", label: "Video" },
-  { id: "audio", label: "Audio" },
   { id: "3d", label: "3D" },
 ];
 
