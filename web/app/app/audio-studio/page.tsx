@@ -367,11 +367,12 @@ export default function AudioStudioPage() {
           </label>
 
           <div className="rounded-lg bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
-            <strong className="text-foreground">Free-only protection:</strong> the worker verifies provider
-            tier and quota before sending a generation request, reserves an estimate, and does not retry
-            generation POSTs after timeouts. Keep both provider accounts on Free plans and disable any
-            paid/overage settings in their dashboards. Estimates are conservative; provider-side usage can
-            update with delay.
+            <strong className="text-foreground">Free-only protection:</strong> ElevenLabs account tier and
+            remaining allowance are checked by the worker. Cartesia’s current usage endpoint does not expose
+            an account-plan check here, so its Free plan must be confirmed manually in the dashboard before
+            enabling its confirmation flag; usage is still checked before each generation. The worker reserves
+            an estimate and never retries generation POSTs after timeouts. Keep usage-based billing/overage
+            disabled. Estimates are conservative, and provider usage can update with delay.
           </div>
 
           {mode === "music" && (
