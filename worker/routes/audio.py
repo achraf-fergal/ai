@@ -1,7 +1,11 @@
-"""Endpoints de démarrage idempotent des Audio Jobs ElevenLabs."""
+"""Idempotent start endpoints for free-tier voice, dialogue, sound effects and short music loops."""
+import os
+import re
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 import db
+from providers import cartesia as cartesia_provider
 from providers import elevenlabs as elevenlabs_provider
 from providers.http_helpers import ProviderError
 from routes.generate import StartJob
@@ -9,7 +13,15 @@ from workflows import audio as audio_workflow
 
 router = APIRouter()
 
-_AUDIO_JOB_TYPES = {"voice_generator", "dialogue_generator"}
+_AUDIO_JOB_TYPES = {
+    "voice_generator",
+    "dialogue_generator",
+    "sound_effect_generator",
+    "music_generator",
+}
+_TEXT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+MAX_SINGLE_TEXT_LENGTH = 5000
+MAX_SOUND_PROMPT_LENGTH = 1000
 
 
 def _claim_audio_job(job_id: str) -> tuple[dict, bool]:
@@ -35,20 +47,59 @@ def _validate_job(job: dict) -> None:
     input_ = job.get("input") or {}
     try:
         if job["type"] == "voice_generator":
-            _text, voice_id, _model = elevenlabs_provider.validate_single_input(input_)
-            voice_ids = {voice_id} if input_.get("voiceId") or input_.get("voice_id") else set()
+            text = input_.get("text")
+            if not isinstance(text, str) or not text.strip() or len(text.strip()) > MAX_SINGLE_TEXT_LENGTH:
+                raise ProviderError("audio: text must contain 1 to 5000 characters")
+
+            # Missing provider means the legacy ElevenLabs UI. The new Studio
+            # explicitly sends provider=cartesia for primary + guarded fallback.
+            selected_provider = input_.get("provider") or "elevenlabs"
+            if selected_provider not in {"cartesia", "elevenlabs"}:
+                raise ProviderError("audio: unsupported speech provider")
+            voice_id = input_.get("voiceId") or input_.get("voice_id")
+            if voice_id is not None and (
+                not isinstance(voice_id, str) or not _TEXT_ID_RE.fullmatch(voice_id)
+            ):
+                raise ProviderError("audio: invalid voice ID")
+
+            if selected_provider == "elevenlabs":
+                _text, normalized_voice, _model = elevenlabs_provider.validate_single_input(input_)
+                voice_ids = {normalized_voice} if voice_id else set()
+                elevenlabs_provider.validate_voice_ids(voice_ids)
+            elif voice_id and not isinstance(voice_id, str):
+                raise ProviderError("cartesia: invalid voice ID")
+
         elif job["type"] == "dialogue_generator":
             turns = elevenlabs_provider.normalize_dialogue_inputs(input_.get("inputs"))
             voice_ids = {turn["voice_id"] for turn in turns}
             language_code = input_.get("languageCode") or input_.get("language_code")
-            if language_code and (not isinstance(language_code, str) or len(language_code) != 2 or not language_code.isalpha()):
+            if language_code and (
+                not isinstance(language_code, str)
+                or len(language_code) != 2
+                or not language_code.isalpha()
+            ):
                 raise ProviderError("elevenlabs: language code must be a two-letter ISO code")
             seed = input_.get("seed")
-            if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 4_294_967_295):
+            if seed is not None and (
+                isinstance(seed, bool)
+                or not isinstance(seed, int)
+                or not 0 <= seed <= 4_294_967_295
+            ):
                 raise ProviderError("elevenlabs: seed must be between 0 and 4294967295")
+            elevenlabs_provider.validate_voice_ids(voice_ids)
+
+        elif job["type"] in {"sound_effect_generator", "music_generator"}:
+            prompt = input_.get("text")
+            if not isinstance(prompt, str) or not prompt.strip() or len(prompt.strip()) > MAX_SOUND_PROMPT_LENGTH:
+                raise ProviderError("audio: prompt must contain 1 to 1000 characters")
+            duration = input_.get("durationSeconds", input_.get("duration_seconds"))
+            minimum = 5 if job["type"] == "music_generator" else 0.5
+            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not minimum <= duration <= 30:
+                raise ProviderError("audio: duration is outside the supported free-tier range")
+            if job["type"] == "sound_effect_generator" and "loop" in input_ and not isinstance(input_["loop"], bool):
+                raise ProviderError("audio: loop must be a boolean")
         else:
             raise HTTPException(400, f"not an audio job: {job['type']}")
-        elevenlabs_provider.validate_voice_ids(voice_ids)
     except ProviderError as err:
         raise HTTPException(422, "Invalid audio generation input.") from err
 
@@ -56,9 +107,6 @@ def _validate_job(job: dict) -> None:
 @router.post("/audio/generate")
 def generate_audio(payload: StartJob, background: BackgroundTasks):
     """Claim an audio job once and run it in FastAPI's existing background task."""
-    if not elevenlabs_provider.is_configured():
-        raise HTTPException(503, "no audio provider configured on worker")
-
     with db.connect() as conn:
         job = conn.execute("SELECT * FROM jobs WHERE id = %s", (payload.job_id,)).fetchone()
     if not job:
@@ -69,6 +117,22 @@ def generate_audio(payload: StartJob, background: BackgroundTasks):
         # A retry after a lost HTTP response receives the same accepted result;
         # it never schedules a second provider generation.
         return {"ok": True, "already_started": True}
+
+    input_ = job.get("input") or {}
+    if job["type"] == "voice_generator":
+        selected_provider = input_.get("provider") or "elevenlabs"
+        provider_ready = (
+            cartesia_provider.is_configured() or elevenlabs_provider.is_configured()
+            if selected_provider == "cartesia"
+            else elevenlabs_provider.is_configured()
+        )
+    else:
+        provider_ready = elevenlabs_provider.is_configured()
+    if not provider_ready:
+        raise HTTPException(
+            503,
+            "Audio API is disabled. Confirm the provider's Free tier and free-only settings in worker/.env.",
+        )
 
     _validate_job(job)
     claimed_job, claimed = _claim_audio_job(payload.job_id)
