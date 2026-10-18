@@ -7,7 +7,6 @@ ni le protocole HTTP ni le format de transport du fournisseur.
 from __future__ import annotations
 
 import os
-import random
 import re
 import threading
 import time
@@ -28,7 +27,6 @@ MAX_DIALOGUE_TURNS = 50
 MAX_UNIQUE_DIALOGUE_VOICES = 10
 MAX_EMOTION_LENGTH = 80
 VOICE_CACHE_TTL_SECONDS = 300
-MAX_PROVIDER_ATTEMPTS = 3
 
 COST_PER_GENERATION_CENTS = 2
 
