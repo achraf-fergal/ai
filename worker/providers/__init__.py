@@ -48,8 +48,15 @@ PROVIDER_ENV_KEYS = {
 }
 
 
+def _env_enabled(key: str) -> bool:
+    value = os.environ.get(key, "")
+    if key == "AUDIO_FREE_ONLY" or key.endswith("_FREE_TIER_CONFIRMED"):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def is_provider_configured(name: str) -> bool:
-    return any(all(os.environ.get(key) for key in group) for group in PROVIDER_ENV_KEYS[name])
+    return any(all(_env_enabled(key) for key in group) for group in PROVIDER_ENV_KEYS[name])
 
 
 def is_any_provider_configured() -> bool:
