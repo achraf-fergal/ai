@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAuth } from "@/lib/auth";
-import { computeCost } from "@/lib/credits";
 import {
   createAudioJobWithReservation,
   getDefaultProject,
@@ -22,7 +21,8 @@ const MAX_DIALOGUE_CHARACTERS = 2000;
 const MAX_DIALOGUE_TURNS = 50;
 const MAX_UNIQUE_DIALOGUE_VOICES = 10;
 const VOICE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const MODELS = new Set(["eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_v3"]);
+const ELEVENLABS_MODELS = new Set(["eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_v3"]);
+const CARTESIA_MODELS = new Set(["sonic-3.6"]);
 
 function stringField(form: FormData, key: string): string | undefined {
   const value = form.get(key);
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
   const mode = stringField(form, "mode") ?? "single";
   const projectIdField = stringField(form, "projectId");
-  let type: "voice_generator" | "dialogue_generator";
+  let type: "voice_generator" | "dialogue_generator" | "sound_effect_generator" | "music_generator";
   let jobInput: Record<string, unknown>;
 
   if (mode === "dialogue") {
@@ -94,12 +94,41 @@ export async function POST(req: NextRequest) {
   } else if (mode === "single") {
     const text = stringField(form, "text")?.trim();
     const voiceId = stringField(form, "voiceId");
-    const model = stringField(form, "model") ?? "eleven_multilingual_v2";
-    if (!text || text.length > MAX_SINGLE_TEXT_LENGTH || (voiceId && !VOICE_ID.test(voiceId)) || !MODELS.has(model)) {
-      return NextResponse.json({ error: "Please provide valid text, voice and model values." }, { status: 400 });
+    // Requests from the existing Voice Generator omit provider; preserve its
+    // ElevenLabs behavior. The Audio Studio explicitly selects Cartesia.
+    const provider = stringField(form, "provider") ?? "elevenlabs";
+    const model = stringField(form, "model") ?? (provider === "cartesia" ? "sonic-3.6" : "eleven_multilingual_v2");
+    const modelAllowed = provider === "cartesia"
+      ? CARTESIA_MODELS.has(model)
+      : provider === "elevenlabs" && ELEVENLABS_MODELS.has(model);
+    if (!text || text.length > MAX_SINGLE_TEXT_LENGTH || (voiceId && !VOICE_ID.test(voiceId)) || !modelAllowed) {
+      return NextResponse.json({ error: "Please provide valid text, provider, voice and model values." }, { status: 400 });
     }
     type = "voice_generator";
-    jobInput = { text, voiceId: voiceId ?? null, model };
+    jobInput = { text, voiceId: voiceId ?? null, model, provider };
+  } else if (mode === "sound_effect" || mode === "music") {
+    const prompt = (stringField(form, "text") ?? stringField(form, "prompt"))?.trim();
+    const rawDuration = stringField(form, "durationSeconds") ?? (mode === "music" ? "10" : undefined);
+    const durationSeconds = rawDuration === undefined ? NaN : Number(rawDuration);
+    const minimumDuration = mode === "music" ? 5 : 0.5;
+    const loopField = stringField(form, "loop");
+    if (
+      !prompt ||
+      prompt.length > 1000 ||
+      !Number.isFinite(durationSeconds) ||
+      durationSeconds < minimumDuration ||
+      durationSeconds > 30 ||
+      (loopField !== undefined && loopField !== "true" && loopField !== "false")
+    ) {
+      return NextResponse.json({ error: "Provide a prompt and a valid duration (0.5–30 seconds for effects, 5–30 seconds for music loops)." }, { status: 400 });
+    }
+    type = mode === "music" ? "music_generator" : "sound_effect_generator";
+    jobInput = {
+      text: prompt,
+      durationSeconds,
+      loop: mode === "music" ? true : loopField === "true",
+      provider: "elevenlabs",
+    };
   } else {
     return NextResponse.json({ error: "Unsupported audio generation mode." }, { status: 400 });
   }
@@ -110,7 +139,9 @@ export async function POST(req: NextRequest) {
   const keyHeader = req.headers.get("idempotency-key");
   if (keyHeader && !validUuid(keyHeader)) return NextResponse.json({ error: "Invalid idempotency key." }, { status: 400 });
   const idempotencyKey = keyHeader ?? randomUUID();
-  const cost = await computeCost({ feature: type, quality: "standard", resolution: "1K", quantity: 1 });
+  // All audio modes in this branch are explicitly free-tier-only. App credits
+  // stay at zero; upstream quota is verified in the worker before generation.
+  const cost = 0;
 
   try {
     const created = await createAudioJobWithReservation({
