@@ -169,6 +169,19 @@ class ElevenLabsFreeQuotaTests(unittest.TestCase):
             elevenlabs._reserve_free_credits(25)
         self.assertEqual(elevenlabs._FREE_USAGE_RESERVED, 25)
 
+    def test_tts_counter_does_not_clear_sound_effect_reservation(self):
+        elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = 100
+        elevenlabs._FREE_USAGE_RESERVED_OTHER = 400
+        elevenlabs._FREE_USAGE_RESERVED = 400
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(character_count=110),
+        ):
+            elevenlabs._reserve_free_credits(5, character_metered=True)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED_OTHER, 400)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED_CHARACTERS, 5)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED, 405)
+
 
 class AudioWorkflowTests(unittest.TestCase):
     def setUp(self):
