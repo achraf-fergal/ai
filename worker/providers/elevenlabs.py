@@ -107,6 +107,16 @@ def _reserve_free_credits(estimated_credits: int) -> None:
         except (TypeError, ValueError) as err:
             raise ProviderError("ElevenLabs overage status could not be verified; generation blocked") from err
 
+    # Refuse accounts configured to extend their monthly allowance through
+    # usage-based billing. Even a Free tier key must not be allowed to overage.
+    extension = data.get("max_credit_limit_extension")
+    if data.get("can_extend_character_limit") is True or extension == "unlimited":
+        raise ProviderError("ElevenLabs request blocked: paid overage is enabled for this account")
+    if isinstance(extension, (int, float)) and not isinstance(extension, bool) and extension > 0:
+        raise ProviderError("ElevenLabs request blocked: paid overage is enabled for this account")
+    if data.get("has_open_invoices") is True:
+        raise ProviderError("ElevenLabs request blocked because the account has open invoices")
+
     count, limit = data.get("character_count"), data.get("character_limit")
     if isinstance(count, bool) or not isinstance(count, int) or isinstance(limit, bool) or not isinstance(limit, int):
         raise ProviderError("ElevenLabs Free quota response was incomplete; generation blocked")
