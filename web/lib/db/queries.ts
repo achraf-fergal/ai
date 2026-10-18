@@ -208,7 +208,7 @@ export async function createAudioJobWithReservation(input: {
                     WHERE user_id = ${input.userId} AND status = 'reserved'), 0)
       )::int AS available`;
     const available = balances[0]?.available ?? 0;
-    if (available < input.creditCost) throw new InsufficientCreditsError(available);
+    if (input.creditCost > 0 && available < input.creditCost) throw new InsufficientCreditsError(available);
 
     const jobs = await tx<Array<{ id: string }>>`
       INSERT INTO jobs (user_id, project_id, type, input, idempotency_key)
