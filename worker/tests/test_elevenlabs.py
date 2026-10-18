@@ -94,14 +94,20 @@ class ElevenLabsFreeQuotaTests(unittest.TestCase):
         self.old_state = (
             elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
             elevenlabs._FREE_USAGE_RESERVED,
+            elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
+            elevenlabs._FREE_USAGE_RESERVED_OTHER,
         )
         elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = None
         elevenlabs._FREE_USAGE_RESERVED = 0
+        elevenlabs._FREE_USAGE_RESERVED_CHARACTERS = 0
+        elevenlabs._FREE_USAGE_RESERVED_OTHER = 0
 
     def tearDown(self):
         (
             elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
             elevenlabs._FREE_USAGE_RESERVED,
+            elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
+            elevenlabs._FREE_USAGE_RESERVED_OTHER,
         ) = self.old_state
 
     def _subscription_response(self, **overrides):
