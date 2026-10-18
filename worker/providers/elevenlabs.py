@@ -66,9 +66,11 @@ _FREE_MONTHLY_CREDIT_CAP = 10_000
 _FREE_USAGE_LOCK = threading.Lock()
 _FREE_USAGE_LAST_SERVER_COUNT: int | None = None
 _FREE_USAGE_RESERVED = 0
+_FREE_USAGE_RESERVED_CHARACTERS = 0
+_FREE_USAGE_RESERVED_OTHER = 0
 
 
-def _reserve_free_credits(estimated_credits: int) -> None:
+def _reserve_free_credits(estimated_credits: int, *, character_metered: bool = True) -> None:
     """Fail closed unless the account is Free and the current quota fits.
 
     Reservations are held locally before POST because a timeout can happen
@@ -76,6 +78,7 @@ def _reserve_free_credits(estimated_credits: int) -> None:
     reconciled with local reservations on each call.
     """
     global _FREE_USAGE_LAST_SERVER_COUNT, _FREE_USAGE_RESERVED
+    global _FREE_USAGE_RESERVED_CHARACTERS, _FREE_USAGE_RESERVED_OTHER
     if estimated_credits < 1:
         raise ProviderError("elevenlabs: invalid free quota estimate")
     if not _truthy("AUDIO_FREE_ONLY"):
@@ -124,18 +127,28 @@ def _reserve_free_credits(estimated_credits: int) -> None:
     safe_limit = max(0, min(limit, configured_cap, _FREE_MONTHLY_CREDIT_CAP))
 
     # Subscription counters reset at the provider's billing-cycle boundary.
+    # character_count covers TTS/dialogue; keep sound-effect credits separate
+    # so a narration count increase cannot incorrectly clear a sound reservation.
     if _FREE_USAGE_LAST_SERVER_COUNT is not None:
         if count < _FREE_USAGE_LAST_SERVER_COUNT:
-            _FREE_USAGE_RESERVED = 0
+            _FREE_USAGE_RESERVED_CHARACTERS = 0
+            _FREE_USAGE_RESERVED_OTHER = 0
         else:
             newly_reported = count - _FREE_USAGE_LAST_SERVER_COUNT
-            _FREE_USAGE_RESERVED = max(0, _FREE_USAGE_RESERVED - newly_reported)
+            _FREE_USAGE_RESERVED_CHARACTERS = max(0, _FREE_USAGE_RESERVED_CHARACTERS - newly_reported)
     _FREE_USAGE_LAST_SERVER_COUNT = count
+    _FREE_USAGE_RESERVED = _FREE_USAGE_RESERVED_CHARACTERS + _FREE_USAGE_RESERVED_OTHER
 
     if count + _FREE_USAGE_RESERVED + estimated_credits > safe_limit:
         raise ProviderError("ElevenLabs Free monthly allowance reached; no generation request was sent")
     # Reserve before POST. Failures/timeouts keep the estimate reserved safely.
-    _FREE_USAGE_RESERVED += estimated_credits
+    # Non-TTS credit usage cannot be reconciled to character_count, so it is
+    # retained conservatively for this worker process.
+    if character_metered:
+        _FREE_USAGE_RESERVED_CHARACTERS += estimated_credits
+    else:
+        _FREE_USAGE_RESERVED_OTHER += estimated_credits
+    _FREE_USAGE_RESERVED = _FREE_USAGE_RESERVED_CHARACTERS + _FREE_USAGE_RESERVED_OTHER
 
 def _headers() -> dict[str, str]:
     return {"xi-api-key": require_env("ELEVENLABS_API_KEY")}
@@ -362,6 +375,7 @@ def generate_sound_effect(input_: dict[str, Any]) -> dict[str, Any]:
         "sound-generation",
         timeout_s=120,
         estimated_credits=estimate,
+        character_metered=False,
     )
     result["model"] = "eleven_text_to_sound_v2"
     result["provider"] = "elevenlabs"
@@ -393,6 +407,7 @@ def generate_music_clip(input_: dict[str, Any]) -> dict[str, Any]:
         "music-loop generation",
         timeout_s=120,
         estimated_credits=estimate,
+        character_metered=False,
     )
     result["model"] = "eleven_text_to_sound_v2 (music loop)"
     result["provider"] = "elevenlabs"
