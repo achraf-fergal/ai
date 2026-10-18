@@ -89,6 +89,81 @@ class ElevenLabsProviderTests(unittest.TestCase):
         post.assert_called_once()
 
 
+class ElevenLabsFreeQuotaTests(unittest.TestCase):
+    def setUp(self):
+        self.old_state = (
+            elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESERVED,
+        )
+        elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = None
+        elevenlabs._FREE_USAGE_RESERVED = 0
+
+    def tearDown(self):
+        (
+            elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESERVED,
+        ) = self.old_state
+
+    def _subscription_response(self, **overrides):
+        data = {
+            "tier": "free",
+            "status": "active",
+            "current_overage": {"amount": "0", "currency": "usd"},
+            "max_credit_limit_extension": 0,
+            "can_extend_character_limit": False,
+            "has_open_invoices": False,
+            "character_count": 10,
+            "character_limit": 10000,
+        }
+        data.update(overrides)
+        return httpx.Response(
+            200,
+            json=data,
+            request=httpx.Request("GET", "https://api.elevenlabs.io/v1/user/subscription"),
+        )
+
+    def _environment(self):
+        return {
+            "AUDIO_FREE_ONLY": "true",
+            "ELEVENLABS_FREE_TIER_CONFIRMED": "true",
+            "ELEVENLABS_API_KEY": "secret-test",
+            "ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT": "10000",
+        }
+
+    def test_paid_tier_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get", return_value=self._subscription_response(tier="starter")
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(10)
+
+    def test_usage_based_overage_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(
+                max_credit_limit_extension=10000,
+                can_extend_character_limit=True,
+            ),
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(10)
+
+    def test_free_quota_exhaustion_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(character_count=9999, character_limit=10000),
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(2)
+
+    def test_valid_free_tier_reserves_quota(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get", return_value=self._subscription_response()
+        ):
+            elevenlabs._reserve_free_credits(25)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED, 25)
+
+
 class AudioWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.job = {"id": "job-1", "user_id": "user-1", "project_id": "project-1", "type": "voice_generator", "input": {"text": "Hello", "creditCost": 4}}
