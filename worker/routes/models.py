@@ -7,17 +7,27 @@ from providers import cartesia, elevenlabs, upscale
 router = APIRouter()
 
 
+def _safe_voices(provider) -> list[dict]:
+    """A failing voice-catalog request must not take down the whole model list."""
+    try:
+        return provider.list_voices()
+    except Exception:
+        return []
+
+
 def _audio_provider_catalog() -> dict:
     cartesia_ready = cartesia.is_configured()
     elevenlabs_ready = elevenlabs.is_configured()
+    cartesia_voices = _safe_voices(cartesia) if cartesia_ready else []
+    elevenlabs_voices = _safe_voices(elevenlabs) if elevenlabs_ready else []
     return {
         "cartesia": {
-            "configured": cartesia_ready,
-            "voices": cartesia.list_voices() if cartesia_ready else [],
+            "configured": cartesia_ready and bool(cartesia_voices),
+            "voices": cartesia_voices,
         },
         "elevenlabs": {
-            "configured": elevenlabs_ready,
-            "voices": elevenlabs.list_voices() if elevenlabs_ready else [],
+            "configured": elevenlabs_ready and bool(elevenlabs_voices),
+            "voices": elevenlabs_voices,
         },
         "soundEffects": {
             "configured": elevenlabs_ready,
