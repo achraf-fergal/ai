@@ -43,6 +43,8 @@ class ElevenLabsProviderTests(unittest.TestCase):
             request=httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-dialogue"),
         )
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", return_value=response
         ) as post:
             result = elevenlabs.generate_dialogue({
@@ -68,6 +70,8 @@ class ElevenLabsProviderTests(unittest.TestCase):
             request=httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-speech/voice_1"),
         )
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", return_value=response
         ) as post:
             result = elevenlabs.generate({"text": "Hello", "voice_id": "voice_1", "model": "eleven_flash_v2_5"})
@@ -76,6 +80,8 @@ class ElevenLabsProviderTests(unittest.TestCase):
 
     def test_read_timeout_is_not_retried(self):
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", side_effect=httpx.ReadTimeout("lost response")
         ) as post:
             with self.assertRaises(ProviderError):
