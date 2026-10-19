@@ -94,8 +94,8 @@ export async function POST(req: NextRequest) {
   } else if (mode === "single") {
     const text = stringField(form, "text")?.trim();
     const voiceId = stringField(form, "voiceId");
-    // Requests from the existing Voice Generator omit provider; preserve its
-    // ElevenLabs behavior. The Audio Studio explicitly selects Cartesia.
+    // Backward-compatible fallback for older clients that omit provider.
+    // Current single-speech UIs explicitly submit Cartesia or ElevenLabs.
     const provider = stringField(form, "provider") ?? "elevenlabs";
     const model = stringField(form, "model") ?? (provider === "cartesia" ? "sonic-3.6" : "eleven_multilingual_v2");
     const modelAllowed = provider === "cartesia"
