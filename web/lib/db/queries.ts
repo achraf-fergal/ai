@@ -179,7 +179,7 @@ export class InsufficientCreditsError extends Error {
 export async function createAudioJobWithReservation(input: {
   userId: string;
   projectId: string;
-  type: "voice_generator" | "dialogue_generator" | "sound_effect_generator" | "music_generator";
+  type: "voice_generator" | "dialogue_generator";
   jobInput: Record<string, unknown>;
   idempotencyKey: string;
   creditCost: number;
