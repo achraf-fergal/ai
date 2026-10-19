@@ -49,9 +49,29 @@ RUNWAY_API_KEY=
 OPENAI_API_KEY=
 MAGIC_HOUR_API_KEY=
 
-# Audio / voix (ElevenLabs)
+# Audio — Free-only fail-closed mode
+AUDIO_FREE_ONLY=true
+
+# Cartesia primary for single-speaker TTS
+CARTESIA_API_KEY=
+CARTESIA_ADMIN_API_KEY=
+CARTESIA_FREE_TIER_CONFIRMED=false
+CARTESIA_FREE_MONTHLY_CREDIT_LIMIT=20000
+CARTESIA_VERSION=2026-08-14
+CARTESIA_DEFAULT_VOICE_ID=
+
+# ElevenLabs fallback for TTS and guarded provider for dialogue
 ELEVENLABS_API_KEY=
+ELEVENLABS_FREE_TIER_CONFIRMED=false
+ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT=10000
+ELEVENLABS_FREE_FALLBACK_VOICE_ID=
 ```
+
+- `AUDIO_FREE_ONLY=true` is required to enable audio. Keep provider overage/pay-as-you-go disabled in each provider dashboard.
+- Cartesia requires both a generation key and an admin key so the worker can check monthly usage before sending speech requests. Set `CARTESIA_FREE_TIER_CONFIRMED=true` only after verifying the account is on Cartesia Free.
+- ElevenLabs requires its key and `ELEVENLABS_FREE_TIER_CONFIRMED=true`; each request checks the active tier, overage state and remaining character quota. Keep this false until the Free plan and billing settings are verified.
+- Single-speaker TTS uses Cartesia first and may use ElevenLabs only when its separate Free quota checks pass. Multi-speaker dialogue uses the existing guarded ElevenLabs text-to-dialogue endpoint.
+- Audio outputs use the existing PostgreSQL jobs/assets and local worker storage. Music and sound effects are not part of the first audio phase.
 
 ## 3. Variables d'authentification et de facturation
 
