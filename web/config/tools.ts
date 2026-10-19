@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  AudioLines,
   Box,
   Camera,
   DoorOpen,
@@ -10,7 +9,6 @@ import {
   Maximize,
   Mic,
   MonitorPlay,
-  Music,
   Scissors,
   Sun,
   Video,
@@ -202,26 +200,10 @@ export const TOOLS: ToolDefinition[] = [
     route: "/app/audio-studio?mode=speech",
   },
   {
-    id: "sound-effects-generator",
-    category: "audio",
-    name: "Sound Effects",
-    description: "Create short sound effects from text within the available Free quota",
-    icon: AudioLines,
-    route: "/app/audio-studio?mode=sound_effect",
-  },
-  {
-    id: "music-loop-generator",
-    category: "audio",
-    name: "Music Loop",
-    description: "Generate short instrumental textures and loops without calling the paid Music API",
-    icon: Music,
-    route: "/app/audio-studio?mode=music",
-  },
-  {
     id: "dialogue-generator",
     category: "audio",
     name: "Dialogue Generator",
-    description: "Generate multi-speaker dialogue using the guarded ElevenLabs Free allowance",
+    description: "Generate multi-speaker dialogue with the existing guarded ElevenLabs Free allowance",
     icon: Mic,
     route: "/app/voice-generator",
   },
