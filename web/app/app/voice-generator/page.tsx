@@ -475,7 +475,6 @@ export default function VoiceGeneratorPage() {
                 "Generation failed, please try again.",
             );
 
-            await refreshBalance();
 
             return;
           }
