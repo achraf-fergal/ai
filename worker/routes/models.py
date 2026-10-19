@@ -29,22 +29,6 @@ def _audio_provider_catalog() -> dict:
             "configured": elevenlabs_ready and bool(elevenlabs_voices),
             "voices": elevenlabs_voices,
         },
-        "soundEffects": {
-            "configured": elevenlabs_ready,
-            "provider": "elevenlabs",
-            "maxDurationSeconds": 30,
-        },
-        "musicLoops": {
-            "configured": elevenlabs_ready,
-            "provider": "elevenlabs",
-            "maxDurationSeconds": 30,
-            "description": "Short musical elements or loops via the sound-generation API; not full-length Music API tracks.",
-        },
-        "fullMusic": {
-            "configured": False,
-            "provider": None,
-            "description": "Full-length music generation APIs are disabled in free-only mode.",
-        },
     }
 
 
