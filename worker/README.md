@@ -39,14 +39,15 @@ providers/                 # un fichier = un provider officiel
   runway.py                # Runway Gen-4
   magichour.py             # Magic Hour (agrégateur — exception assumée)
   upscale.py               # provider dédié image upscale (Magic Hour)
-  elevenlabs.py            # ElevenLabs (Voice Generator)
+  cartesia.py              # Cartesia TTS (primary, Free-quota checked)
+  elevenlabs.py            # ElevenLabs TTS fallback + guarded multi-speaker dialogue
 workflows/                 # logique métier exécutée en BackgroundTasks
   common.py                # helpers DB + stockage + completion/fail idempotents
   engine.py                # fallback, ordonnancement par tier
   image_render.py         # génération image (5 features image)
   video.py                # génération vidéo (Animate)
   upscale.py              # upscaling image
-  audio.py                # génération voix (ElevenLabs)
+  audio.py                # Cartesia-first TTS / guarded ElevenLabs dialogue workflow
   video_edit.py           # montage simple (trim / concat)
   video_upscale.py        # upscaling vidéo frame par frame
 routes/                    # endpoints FastAPI
@@ -62,7 +63,9 @@ storage/                   # fichiers générés en local (dev)
 tests/                     # tests hors-ligne / smoke
   test_fallback.py        # moteur de fallback
   test_video_modes.py     # détection des modes vidéo
-  test_elevenlabs.py      # provider ElevenLabs (mocké)
+  test_cartesia.py        # Cartesia Free-quota gates (mocked)
+  test_elevenlabs.py      # ElevenLabs Free quota + dialogue (mocked)
+  test_audio_routing.py   # Cartesia-first / guarded fallback routing
 ```
 
 ## Endpoints exposés
@@ -73,7 +76,7 @@ tests/                     # tests hors-ligne / smoke
 - `POST /upscale` — upscaling image.
 - `POST /video/upscale` — upscaling vidéo.
 - `POST /video/edit` — montage vidéo (trim / concat).
-- `POST /audio/generate` — génération de voix (ElevenLabs).
+- `POST /audio/generate` — TTS Cartesia en priorité avec fallback ElevenLabs strictement limité au quota Free ; dialogue multi-voix via ElevenLabs Free.
 - `GET /jobs/{id}` — état d'un job.
 - `GET /storage/{path}` — fichiers générés.
 
@@ -83,6 +86,7 @@ tests/                     # tests hors-ligne / smoke
 cd worker
 ./.venv/Scripts/python -m tests.test_fallback
 ./.venv/Scripts/python -m tests.test_elevenlabs
+./.venv/Scripts/python -m unittest tests.test_cartesia tests.test_audio_routing
 ```
 
 ## Ajouter un provider IA
