@@ -47,8 +47,8 @@ def _validate_job(job: dict) -> None:
             if not isinstance(text, str) or not text.strip() or len(text.strip()) > MAX_SINGLE_TEXT_LENGTH:
                 raise ProviderError("audio: text must contain 1 to 5000 characters")
 
-            # Missing provider means the legacy ElevenLabs UI. The new Studio
-            # explicitly sends provider=cartesia for primary + guarded fallback.
+            # Missing provider retains backward-compatible ElevenLabs behavior.
+            # Current TTS UIs submit a provider explicitly.
             selected_provider = input_.get("provider") or "elevenlabs"
             if selected_provider not in {"cartesia", "elevenlabs"}:
                 raise ProviderError("audio: unsupported speech provider")
