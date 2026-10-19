@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
   const mode = stringField(form, "mode") ?? "single";
   const projectIdField = stringField(form, "projectId");
-  let type: "voice_generator" | "dialogue_generator" | "sound_effect_generator" | "music_generator";
+  let type: "voice_generator" | "dialogue_generator";
   let jobInput: Record<string, unknown>;
 
   if (mode === "dialogue") {
@@ -106,29 +106,6 @@ export async function POST(req: NextRequest) {
     }
     type = "voice_generator";
     jobInput = { text, voiceId: voiceId ?? null, model, provider };
-  } else if (mode === "sound_effect" || mode === "music") {
-    const prompt = (stringField(form, "text") ?? stringField(form, "prompt"))?.trim();
-    const rawDuration = stringField(form, "durationSeconds") ?? (mode === "music" ? "10" : undefined);
-    const durationSeconds = rawDuration === undefined ? NaN : Number(rawDuration);
-    const minimumDuration = mode === "music" ? 5 : 0.5;
-    const loopField = stringField(form, "loop");
-    if (
-      !prompt ||
-      prompt.length > 1000 ||
-      !Number.isFinite(durationSeconds) ||
-      durationSeconds < minimumDuration ||
-      durationSeconds > 30 ||
-      (loopField !== undefined && loopField !== "true" && loopField !== "false")
-    ) {
-      return NextResponse.json({ error: "Provide a prompt and a valid duration (0.5–30 seconds for effects, 5–30 seconds for music loops)." }, { status: 400 });
-    }
-    type = mode === "music" ? "music_generator" : "sound_effect_generator";
-    jobInput = {
-      text: prompt,
-      durationSeconds,
-      loop: mode === "music" ? true : loopField === "true",
-      provider: "elevenlabs",
-    };
   } else {
     return NextResponse.json({ error: "Unsupported audio generation mode." }, { status: 400 });
   }
@@ -139,7 +116,7 @@ export async function POST(req: NextRequest) {
   const keyHeader = req.headers.get("idempotency-key");
   if (keyHeader && !validUuid(keyHeader)) return NextResponse.json({ error: "Invalid idempotency key." }, { status: 400 });
   const idempotencyKey = keyHeader ?? randomUUID();
-  // All audio modes in this branch are explicitly free-tier-only. App credits
+  // Speech and dialogue modes are explicitly free-tier-only. App credits
   // stay at zero; upstream quota is verified in the worker before generation.
   const cost = 0;
 
