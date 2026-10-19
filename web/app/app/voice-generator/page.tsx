@@ -156,9 +156,6 @@ export default function VoiceGeneratorPage() {
   const [audioProviders, setAudioProviders] = useState<AudioProviderCatalog>({});
   const [singleProvider, setSingleProvider] = useState<SpeechProvider>("cartesia");
   const voices = mode === "single" && singleProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
-  const [balance, setBalance] =
-    useState<number | null>(null);
-
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] =
     useState<string | null>(null);
@@ -192,27 +189,6 @@ export default function VoiceGeneratorPage() {
   useEffect(() => {
     return stopPolling;
   }, [stopPolling]);
-
-  const refreshBalance = useCallback(async () => {
-    try {
-      const response = await fetch(
-        "/api/credits/balance",
-        {
-          cache: "no-store",
-        },
-      );
-
-      if (!response.ok) return;
-
-      const data = await response.json();
-
-      if (typeof data.balance === "number") {
-        setBalance(data.balance);
-      }
-    } catch {
-      // Keep the last server-reported balance.
-    }
-  }, []);
 
   /*
    * ---------------------------------------------------------
@@ -248,8 +224,7 @@ export default function VoiceGeneratorPage() {
         setCartesiaVoices([]);
       });
 
-    void refreshBalance();
-  }, [refreshBalance]);
+  }, []);
 
   useEffect(() => {
     const selectedVoices = mode === "single" && singleProvider === "cartesia"
@@ -486,7 +461,6 @@ export default function VoiceGeneratorPage() {
             setDialogueJobId(null);
             idempotencyKeyRef.current = null;
 
-            await refreshBalance();
 
             return;
           }
@@ -522,7 +496,7 @@ export default function VoiceGeneratorPage() {
           POLL_INTERVAL_MS,
         );
     },
-    [refreshBalance, stopPolling],
+    [stopPolling],
   );
 
   const handleGenerate = async () => {
@@ -643,14 +617,8 @@ export default function VoiceGeneratorPage() {
         await response.json();
 
       if (response.status === 402) {
-        setBalance(
-          typeof data.balance === "number"
-            ? data.balance
-            : balance,
-        );
-
         setError(
-          "You don't have enough credits for this generation.",
+          "The generation request was rejected by the current provider or quota policy.",
         );
 
         setIsBusy(false);
@@ -696,15 +664,10 @@ export default function VoiceGeneratorPage() {
           </h1>
 
           <p className="text-sm text-muted-foreground">
-            Create voiceovers with Cartesia first, or build multi-speaker dialogue with guarded ElevenLabs Free access.
+            Create voiceovers with Cartesia first, or build multi-speaker dialogue with the guarded ElevenLabs Free allowance.
           </p>
         </div>
 
-        <div className="text-sm text-muted-foreground">
-          {balance === null
-            ? "…"
-            : `${balance} credits`}
-        </div>
       </header>
 
       <div className="grid flex-1 lg:grid-cols-[460px_1fr]">
