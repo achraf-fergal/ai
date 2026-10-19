@@ -1,13 +1,11 @@
 # Free-only Audio Studio
 
-This branch adds an Audio Studio to the existing Next.js + FastAPI + PostgreSQL application. It reuses the existing jobs, credit reservation, asset and storage pipeline. It does not replace the database schema or rebuild the application.
+This branch adds a speech-focused Audio Studio and retains the existing dialogue generator in the Next.js + FastAPI + PostgreSQL application. It reuses the existing jobs, reservation, asset and storage pipeline. It does not replace the database schema or rebuild the application. The first phase deliberately exposes speech and dialogue only; music and sound effects are deferred.
 
 ## What is available
 
 - **Speech:** Cartesia Sonic 3.6 is the primary provider. If its Free quota check fails or the request fails, the worker can try ElevenLabs only after its independent Free-account and quota checks pass.
 - **Dialogue:** Uses the existing ElevenLabs text-to-dialogue endpoint, with a Free-tier quota preflight.
-- **Sound effects:** Uses ElevenLabs' sound-generation endpoint. A duration is mandatory because the current official guidance prices specified-duration effects at 40 credits per second.
-- **Music:** The UI produces 5–30 second musical elements/loops through the sound-generation endpoint. It does **not** call ElevenLabs' full Music API because that API is restricted to paid subscribers. This short-loop feature is not equivalent to full-song generation.
 
 ## Environment
 
@@ -39,7 +37,6 @@ Restart the FastAPI worker after changing `worker/.env`. Provider keys must stay
 - ElevenLabs generation is blocked unless the account reports an active Free tier, a valid usage limit, and enough remaining monthly quota.
 - Monthly caps cannot be configured above the published Free allowances in the code (20,000 Cartesia TTS credits and 10,000 ElevenLabs credits).
 - Each generation POST is sent once. Generation POSTs are not automatically retried after a timeout because the provider may already have processed the request.
-- Sound effects and music loops require an explicit duration and reserve a conservative estimate before sending the request.
 - Audio jobs are created with zero application credits in this branch, while the existing jobs, assets and storage records remain in use.
 
 These checks are fail-closed safeguards, not a substitute for reviewing billing settings on the provider account. Keep pay-as-you-go/overage disabled in provider dashboards. They also cannot prevent someone from using a provider key outside this application.
