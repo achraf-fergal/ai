@@ -1,4 +1,4 @@
-"""Idempotent start endpoints for free-tier voice, dialogue, sound effects and short music loops."""
+"""Idempotent start endpoints for free-tier speech and dialogue jobs."""
 import re
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -15,12 +15,9 @@ router = APIRouter()
 _AUDIO_JOB_TYPES = {
     "voice_generator",
     "dialogue_generator",
-    "sound_effect_generator",
-    "music_generator",
 }
 _TEXT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 MAX_SINGLE_TEXT_LENGTH = 5000
-MAX_SOUND_PROMPT_LENGTH = 1000
 
 
 def _claim_audio_job(job_id: str) -> tuple[dict, bool]:
@@ -87,16 +84,6 @@ def _validate_job(job: dict) -> None:
                 raise ProviderError("elevenlabs: seed must be between 0 and 4294967295")
             elevenlabs_provider.validate_voice_ids(voice_ids)
 
-        elif job["type"] in {"sound_effect_generator", "music_generator"}:
-            prompt = input_.get("text")
-            if not isinstance(prompt, str) or not prompt.strip() or len(prompt.strip()) > MAX_SOUND_PROMPT_LENGTH:
-                raise ProviderError("audio: prompt must contain 1 to 1000 characters")
-            duration = input_.get("durationSeconds", input_.get("duration_seconds"))
-            minimum = 5 if job["type"] == "music_generator" else 0.5
-            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not minimum <= duration <= 30:
-                raise ProviderError("audio: duration is outside the supported free-tier range")
-            if job["type"] == "sound_effect_generator" and "loop" in input_ and not isinstance(input_["loop"], bool):
-                raise ProviderError("audio: loop must be a boolean")
         else:
             raise HTTPException(400, f"not an audio job: {job['type']}")
     except ProviderError as err:
