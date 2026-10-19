@@ -58,7 +58,7 @@ Le worker expose :
 - `POST /upscale` — upscaling d'image.
 - `POST /video/upscale` — upscaling de vidéo.
 - `POST /video/edit` — montage simple de vidéo (découpe / concaténation).
-- `POST /audio/generate` — génération de voix (ElevenLabs).
+- `POST /audio/generate` — TTS Cartesia en priorité, avec fallback ElevenLabs strictement limité au quota Free ; dialogue multi-voix via ElevenLabs Free.
 - `GET /jobs/{id}` — état d'un job.
 - `GET /storage/{path}` — fichiers générés.
 
@@ -183,8 +183,18 @@ RUNWAY_API_KEY=
 OPENAI_API_KEY=
 MAGIC_HOUR_API_KEY=
 
-# Voice Generator (ElevenLabs)
+# Audio — fail-closed Free-only mode (worker only)
+AUDIO_FREE_ONLY=true
+CARTESIA_API_KEY=
+CARTESIA_ADMIN_API_KEY=
+CARTESIA_FREE_TIER_CONFIRMED=false
+CARTESIA_FREE_MONTHLY_CREDIT_LIMIT=20000
+CARTESIA_VERSION=2026-08-14
+CARTESIA_DEFAULT_VOICE_ID=
 ELEVENLABS_API_KEY=
+ELEVENLABS_FREE_TIER_CONFIRMED=false
+ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT=10000
+ELEVENLABS_FREE_FALLBACK_VOICE_ID=
 ```
 
 Un provider non configuré est simplement sauté par le fallback.
@@ -236,7 +246,7 @@ Les 10 onglets/outils du studio :
 7. **Upscale** : amélioration d'une image existante (upload ou asset), facteur 2×/4×, modèle au choix.
 8. **Video Upscaler** : amélioration d'une vidéo existante (frame par frame puis ré-encodage ffmpeg), facteur 2×/4×.
 9. **Clip Editor / Video Project Editor** : découpe et assemblage de clips vidéo via ffmpeg.
-10. **Voice Generator (Speak)** : génération audio / voix off à partir d'un texte (ElevenLabs).
+10. **Audio Studio / Voice Generator** : voix off avec Cartesia en priorité, fallback ElevenLabs Free contrôlé par quota ; dialogue multi-voix avec le moteur ElevenLabs Free.
 11. **Models** : page de découverte des modèles disponibles pour chaque type de génération.
 
 ### Upscale
