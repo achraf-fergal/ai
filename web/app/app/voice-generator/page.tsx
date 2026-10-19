@@ -24,6 +24,18 @@ interface VoiceOption {
   description: string;
 }
 
+type SpeechProvider = "cartesia" | "elevenlabs";
+
+interface AudioProviderOption {
+  configured?: boolean;
+  voices?: VoiceOption[];
+}
+
+interface AudioProviderCatalog {
+  cartesia?: AudioProviderOption;
+  elevenlabs?: AudioProviderOption;
+}
+
 interface Character {
   id: string;
   name: string;
@@ -139,7 +151,11 @@ export default function VoiceGeneratorPage() {
   const [languageCode, setLanguageCode] = useState("en");
   const [seed, setSeed] = useState("");
 
-  const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [elevenLabsVoices, setElevenLabsVoices] = useState<VoiceOption[]>([]);
+  const [cartesiaVoices, setCartesiaVoices] = useState<VoiceOption[]>([]);
+  const [audioProviders, setAudioProviders] = useState<AudioProviderCatalog>({});
+  const [singleProvider, setSingleProvider] = useState<SpeechProvider>("cartesia");
+  const voices = mode === "single" && singleProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
   const [balance, setBalance] =
     useState<number | null>(null);
 
@@ -205,29 +221,44 @@ export default function VoiceGeneratorPage() {
    */
 
   useEffect(() => {
-    fetch("/api/models", {
-      cache: "no-store",
-    })
-      .then((res) =>
-        res.ok ? res.json() : { audio: [] },
-      )
-      .then((data: { audio?: VoiceOption[] }) => {
-        const list = Array.isArray(data.audio)
-          ? data.audio
-          : [];
+    fetch("/api/models", { cache: "no-store" })
+      .then((res) => res.ok ? res.json() : { audio: [], audioProviders: {} })
+      .then((data: {
+        audio?: VoiceOption[];
+        audioProviders?: AudioProviderCatalog;
+      }) => {
+        const providerCatalog = data.audioProviders ?? {};
+        const elevenLabs = providerCatalog.elevenlabs?.voices ?? data.audio ?? [];
+        const cartesia = providerCatalog.cartesia?.voices ?? [];
 
-        setVoices(list);
+        setAudioProviders(providerCatalog);
+        setElevenLabsVoices(elevenLabs);
+        setCartesiaVoices(cartesia);
 
-        if (list.length) {
-          setVoiceId((current) =>
-            current || list[0].key,
-          );
-        }
+        const preferred: SpeechProvider =
+          providerCatalog.cartesia?.configured && cartesia.length > 0
+            ? "cartesia"
+            : "elevenlabs";
+        setSingleProvider(preferred);
+        const preferredVoices = preferred === "cartesia" ? cartesia : elevenLabs;
+        setVoiceId(preferredVoices[0]?.key ?? "");
       })
-      .catch(() => setVoices([]));
+      .catch(() => {
+        setElevenLabsVoices([]);
+        setCartesiaVoices([]);
+      });
 
     void refreshBalance();
   }, [refreshBalance]);
+
+  useEffect(() => {
+    const selectedVoices = mode === "single" && singleProvider === "cartesia"
+      ? cartesiaVoices
+      : elevenLabsVoices;
+    if (!selectedVoices.some((voice) => voice.key === voiceId)) {
+      setVoiceId(selectedVoices[0]?.key ?? "");
+    }
+  }, [mode, singleProvider, cartesiaVoices, elevenLabsVoices, voiceId]);
 
   const dialogueLength = turns.reduce(
     (sum, turn) =>
@@ -534,9 +565,10 @@ export default function VoiceGeneratorPage() {
         );
       }
 
+      form.append("provider", singleProvider);
       form.append(
         "model",
-        "eleven_multilingual_v2",
+        singleProvider === "cartesia" ? "sonic-3.6" : "eleven_multilingual_v2",
       );
     } else {
       /*
@@ -664,7 +696,7 @@ export default function VoiceGeneratorPage() {
           </h1>
 
           <p className="text-sm text-muted-foreground">
-            Create a voiceover or a conversation with ElevenLabs.
+            Create voiceovers with Cartesia first, or build multi-speaker dialogue with guarded ElevenLabs Free access.
           </p>
         </div>
 
@@ -707,6 +739,24 @@ export default function VoiceGeneratorPage() {
               {mode === "single" ? (
                 <>
                   {/* Single voice */}
+                  <label className="flex flex-col gap-1.5 text-sm font-medium">
+                    Speech provider
+
+                    <select
+                      value={singleProvider}
+                      onChange={(event) => setSingleProvider(event.target.value as SpeechProvider)}
+                      disabled={isBusy}
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal"
+                    >
+                      <option value="cartesia" disabled={!audioProviders.cartesia?.configured}>Cartesia (primary)</option>
+                      <option value="elevenlabs" disabled={!audioProviders.elevenlabs?.configured}>ElevenLabs (Free fallback/provider)</option>
+                    </select>
+
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Cartesia is preferred. Any ElevenLabs fallback is blocked unless its Free-tier allowance and overage settings pass server checks.
+                    </span>
+                  </label>
+
                   <label className="flex flex-col gap-1.5 text-sm font-medium">
                     Voice
 
