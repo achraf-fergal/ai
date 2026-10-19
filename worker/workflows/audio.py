@@ -85,12 +85,6 @@ def run(job: dict) -> None:
             # Cartesia currently handles one transcript per TTS request; keep
             # structured multi-speaker dialogue on the guarded ElevenLabs API.
             result = elevenlabs.generate_dialogue(input_)
-        elif job["type"] == "sound_effect_generator":
-            result = elevenlabs.generate_sound_effect(input_)
-        elif job["type"] == "music_generator":
-            # Free-tier API supports short musical elements/loops through the
-            # sound-generation endpoint, not full-length tracks via Music API.
-            result = elevenlabs.generate_music_clip(input_)
         else:
             raise ValueError("unsupported audio job type")
 
