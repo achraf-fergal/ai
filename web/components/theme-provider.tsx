@@ -21,7 +21,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     root.classList.remove("light", "dark");
     root.classList.add(next);
     try {
-      localStorage.setItem("renderuim-theme", next);
+      localStorage.setItem("audio-studio-theme", next);
     } catch {
       // ignore
     }
@@ -46,7 +46,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     let stored: Theme | null = null;
     try {
-      stored = localStorage.getItem("renderuim-theme") as Theme | null;
+      stored = localStorage.getItem("audio-studio-theme") as Theme | null;
     } catch {
       // ignore
     }

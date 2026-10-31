@@ -1,40 +1,36 @@
-"""Stockage fichiers local (dev) — remplacé par S3/Supabase Storage en prod
-(l'interface save_file/get_url/resolve/delete_file restera la même).
-
-save_file() écrit sous un nom unique dans STORAGE_DIR et retourne le chemin
-PUBLIC relatif (/storage/<nom>) ; main.py monte ce dossier en statique.
-"""
+"""Local storage for generated and uploaded audio files."""
 import uuid
 from pathlib import Path
 
-from config import PUBLIC_BASE_URL, STORAGE_DIR
+from config import STORAGE_DIR
+
+_AUDIO_EXTENSIONS = {"mp3", "wav", "ogg", "webm", "mp4", "m4a"}
 
 
 def save_file(data: bytes, ext: str) -> str:
-    """Écrit `data` et retourne le chemin public relatif (/storage/<uuid>.<ext>)."""
+    """Write an audio file with a generated name and return its public path."""
+    extension = ext.lstrip(".").lower()
+    if extension not in _AUDIO_EXTENSIONS:
+        raise ValueError("unsupported audio file extension")
+    if not data:
+        raise ValueError("cannot store an empty audio file")
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4()}.{ext.lstrip('.')}"
+    name = f"{uuid.uuid4()}.{extension}"
     (STORAGE_DIR / name).write_bytes(data)
     return f"/storage/{name}"
 
 
-def get_url(storage_path: str) -> str:
-    """Chemin public relatif -> URL absolue consommable par le navigateur."""
-    return f"{PUBLIC_BASE_URL}{storage_path}"
-
-
 def resolve(storage_path: str) -> Path:
-    """Chemin public relatif -> chemin disque (validation anti-traversal :
-    un seul segment de nom, aucun séparateur)."""
+    """Resolve one worker storage path without allowing directory traversal."""
     name = storage_path.removeprefix("/storage/")
     if not name or "/" in name or "\\" in name or ".." in name:
-        raise ValueError(f"invalid storage path: {storage_path!r}")
+        raise ValueError("invalid storage path")
     return STORAGE_DIR / name
 
 
 def delete_file(storage_path: str) -> None:
-    """Suppression best-effort (purge des assets trashés)."""
+    """Delete one stored audio file, ignoring malformed paths."""
     try:
         resolve(storage_path).unlink(missing_ok=True)
     except ValueError:
-        pass
+        return

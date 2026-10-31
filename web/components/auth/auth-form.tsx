@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GoogleIcon } from "@/components/icons/google";
-import { RenderuimLogo } from "@/components/icons/renderuim";
+import { AudioStudioLogo } from "@/components/icons/audio-studio";
 import { signInWithPassword, signInWithGoogle, signUp } from "@/app/(auth)/login/actions";
 
 export function AuthForm({
@@ -27,7 +27,12 @@ export function AuthForm({
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [signupSuccess, setSignupSuccess] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   function resetForm() {
     setError(null);
@@ -83,7 +88,7 @@ export function AuthForm({
       <div className="space-y-6 text-center">
         <div className="flex justify-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <RenderuimLogo className="h-8 w-8" />
+            <AudioStudioLogo className="h-8 w-8" />
           </div>
         </div>
         <div>
@@ -113,15 +118,15 @@ export function AuthForm({
     <div className="space-y-6">
       <div className="text-center">
         <div className="flex justify-center">
-          <RenderuimLogo showWordmark className="h-10 w-10" />
+          <AudioStudioLogo showWordmark className="h-10 w-10" />
         </div>
         <h1 className="mt-5 text-3xl font-semibold tracking-tight text-foreground">
           {mode === "login" ? "Welcome back" : "Create your account"}
         </h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
           {mode === "login"
-            ? "Sign in to continue to Renderuim"
-            : "Start generating visuals with Renderuim"}
+            ? "Sign in to continue to Audio Studio"
+            : "Start creating speech and dialogue with Audio Studio"}
         </p>
       </div>
 
@@ -147,7 +152,7 @@ export function AuthForm({
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form method="post" onSubmit={handleSubmit} className="space-y-4">
         {mode === "signup" && (
           <div className="space-y-2">
             <Label htmlFor="fullName">Full name</Label>
@@ -214,7 +219,7 @@ export function AuthForm({
           </p>
         )}
 
-        <Button type="submit" className="w-full" disabled={busy}>
+        <Button type="submit" className="w-full" disabled={busy || !hydrated}>
           {mode === "login" ? "Continue" : "Create account"}
         </Button>
       </form>

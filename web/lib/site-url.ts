@@ -10,5 +10,5 @@ export function getSiteUrl(): URL {
       ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
       : null);
 
-  return new URL(configuredUrl ?? "http://192.168.1.4:3000/");
+  return new URL(configuredUrl ?? "http://localhost:3000/");
 }

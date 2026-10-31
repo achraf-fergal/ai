@@ -43,6 +43,8 @@ class ElevenLabsProviderTests(unittest.TestCase):
             request=httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-dialogue"),
         )
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", return_value=response
         ) as post:
             result = elevenlabs.generate_dialogue({
@@ -68,6 +70,8 @@ class ElevenLabsProviderTests(unittest.TestCase):
             request=httpx.Request("POST", "https://api.elevenlabs.io/v1/text-to-speech/voice_1"),
         )
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", return_value=response
         ) as post:
             result = elevenlabs.generate({"text": "Hello", "voice_id": "voice_1", "model": "eleven_flash_v2_5"})
@@ -76,11 +80,111 @@ class ElevenLabsProviderTests(unittest.TestCase):
 
     def test_read_timeout_is_not_retried(self):
         with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "secret-test"}), patch.object(
+            elevenlabs, "_reserve_free_credits"
+        ), patch.object(
             elevenlabs._CLIENT, "post", side_effect=httpx.ReadTimeout("lost response")
         ) as post:
             with self.assertRaises(ProviderError):
                 elevenlabs.generate({"text": "Hello", "voice_id": "voice_1"})
         post.assert_called_once()
+
+
+class ElevenLabsFreeQuotaTests(unittest.TestCase):
+    def setUp(self):
+        self.old_state = (
+            elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESET_UNIX,
+            elevenlabs._FREE_USAGE_RESERVED,
+            elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
+            elevenlabs._FREE_USAGE_RESERVED_OTHER,
+        )
+        elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = None
+        elevenlabs._FREE_USAGE_RESET_UNIX = None
+        elevenlabs._FREE_USAGE_RESERVED = 0
+        elevenlabs._FREE_USAGE_RESERVED_CHARACTERS = 0
+        elevenlabs._FREE_USAGE_RESERVED_OTHER = 0
+
+    def tearDown(self):
+        (
+            elevenlabs._FREE_USAGE_LAST_SERVER_COUNT,
+            elevenlabs._FREE_USAGE_RESET_UNIX,
+            elevenlabs._FREE_USAGE_RESERVED,
+            elevenlabs._FREE_USAGE_RESERVED_CHARACTERS,
+            elevenlabs._FREE_USAGE_RESERVED_OTHER,
+        ) = self.old_state
+
+    def _subscription_response(self, **overrides):
+        data = {
+            "tier": "free",
+            "status": "active",
+            "current_overage": {"amount": "0", "currency": "usd"},
+            "max_credit_limit_extension": 0,
+            "can_extend_character_limit": False,
+            "has_open_invoices": False,
+            "character_count": 10,
+            "character_limit": 10000,
+            "next_character_count_reset_unix": 4_102_444_800,
+        }
+        data.update(overrides)
+        return httpx.Response(
+            200,
+            json=data,
+            request=httpx.Request("GET", "https://api.elevenlabs.io/v1/user/subscription"),
+        )
+
+    def _environment(self):
+        return {
+            "AUDIO_FREE_ONLY": "true",
+            "ELEVENLABS_FREE_TIER_CONFIRMED": "true",
+            "ELEVENLABS_API_KEY": "secret-test",
+            "ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT": "10000",
+        }
+
+    def test_paid_tier_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get", return_value=self._subscription_response(tier="starter")
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(10)
+
+    def test_usage_based_overage_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(
+                max_credit_limit_extension=10000,
+                can_extend_character_limit=True,
+            ),
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(10)
+
+    def test_free_quota_exhaustion_is_rejected(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(character_count=9999, character_limit=10000),
+        ):
+            with self.assertRaises(ProviderError):
+                elevenlabs._reserve_free_credits(2)
+
+    def test_valid_free_tier_reserves_quota(self):
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get", return_value=self._subscription_response()
+        ):
+            elevenlabs._reserve_free_credits(25)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED, 25)
+
+    def test_tts_counter_does_not_clear_sound_effect_reservation(self):
+        elevenlabs._FREE_USAGE_LAST_SERVER_COUNT = 100
+        elevenlabs._FREE_USAGE_RESERVED_OTHER = 400
+        elevenlabs._FREE_USAGE_RESERVED = 400
+        with patch.dict(os.environ, self._environment()), patch.object(
+            elevenlabs._CLIENT, "get",
+            return_value=self._subscription_response(character_count=110),
+        ):
+            elevenlabs._reserve_free_credits(5, character_metered=True)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED_OTHER, 400)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED_CHARACTERS, 5)
+        self.assertEqual(elevenlabs._FREE_USAGE_RESERVED, 405)
 
 
 class AudioWorkflowTests(unittest.TestCase):
@@ -107,6 +211,7 @@ class AudioWorkflowTests(unittest.TestCase):
         consume.assert_called_once_with(self.conn, "job-1")
         insert_asset.assert_called_once_with(self.conn, self.job, "audio", "/storage/a.mp3")
         complete.assert_called_once()
+        self.assertEqual(complete.call_args.args[3], 0)  # Free-only mode must not debit app credits.
         fail.assert_not_called()
         release.assert_not_called()
 

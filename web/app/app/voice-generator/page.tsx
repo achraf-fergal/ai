@@ -12,21 +12,31 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  fetchCostsConfig,
-  computeDisplayCost,
-  type CostsConfig,
-} from "@/lib/config/action-costs";
 
 const POLL_INTERVAL_MS = 2500;
 const MAX_TEXT_LENGTH = 5000;
 const MAX_DIALOGUE_CHARACTERS = 2000;
+const MAX_DIALOGUE_TURNS = 50;
 const MAX_CHARACTERS = 50;
 
 interface VoiceOption {
   key: string;
   name: string;
   description: string;
+}
+
+type SpeechProvider = "cartesia" | "elevenlabs";
+
+interface AudioProviderOption {
+  configured?: boolean;
+  enabled?: boolean;
+  catalogError?: string | null;
+  voices?: VoiceOption[];
+}
+
+interface AudioProviderCatalog {
+  cartesia?: AudioProviderOption;
+  elevenlabs?: AudioProviderOption;
 }
 
 interface Character {
@@ -54,6 +64,18 @@ const EMOTIONS = [
   { value: "serious", label: "Serious" },
   { value: "whispering", label: "Whispering" },
   { value: "surprised", label: "Surprised" },
+  { value: "confident", label: "Confident" },
+];
+const CARTESIA_EMOTIONS = [
+  { value: "", label: "Neutral" },
+  { value: "happy", label: "Happy" },
+  { value: "sad", label: "Sad" },
+  { value: "angry", label: "Angry" },
+  { value: "excited", label: "Excited" },
+  { value: "scared", label: "Scared" },
+  { value: "surprised", label: "Surprised" },
+  { value: "curious", label: "Curious" },
+  { value: "calm", label: "Calm" },
   { value: "confident", label: "Confident" },
 ];
 
@@ -144,13 +166,30 @@ export default function VoiceGeneratorPage() {
   const [languageCode, setLanguageCode] = useState("en");
   const [seed, setSeed] = useState("");
 
-  const [voices, setVoices] = useState<VoiceOption[]>([]);
-  const [costsConfig, setCostsConfig] =
-    useState<CostsConfig | null>(null);
-
-  const [balance, setBalance] =
-    useState<number | null>(null);
-
+  const [elevenLabsVoices, setElevenLabsVoices] = useState<VoiceOption[]>([]);
+  const [cartesiaVoices, setCartesiaVoices] = useState<VoiceOption[]>([]);
+  const [audioProviders, setAudioProviders] = useState<AudioProviderCatalog>({});
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [providerLoadError, setProviderLoadError] = useState(false);
+  const [singleProvider, setSingleProvider] = useState<SpeechProvider>("cartesia");
+  const [dialogueProvider, setDialogueProvider] = useState<SpeechProvider>("cartesia");
+  const selectedProvider = mode === "dialogue" ? dialogueProvider : singleProvider;
+  const voices = selectedProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
+  const dialogueProviderReady = Boolean(
+    audioProviders[dialogueProvider]?.configured &&
+      (dialogueProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices).length,
+  );
+  const elevenLabsCatalogMessage = !audioProviders.elevenlabs?.enabled
+    ? "ElevenLabs is disabled until its API key and Free-tier settings are configured in worker/.env."
+    : audioProviders.elevenlabs?.catalogError === "credentials_rejected"
+      ? "ElevenLabs rejected the API key. Replace it with a valid key, then restart the worker."
+      : audioProviders.elevenlabs?.catalogError === "rate_limited"
+        ? "ElevenLabs temporarily rate-limited voice loading. Wait a moment and reload the catalog."
+        : audioProviders.elevenlabs?.catalogError === "network_unavailable"
+          ? "The worker could not reach ElevenLabs to load voices. Check its internet connection."
+          : audioProviders.elevenlabs?.catalogError?.startsWith("http_")
+            ? "ElevenLabs returned an error while loading voices. Check the API key and worker terminal."
+            : "ElevenLabs is enabled, but its voice catalog is unavailable. Check the API key and worker terminal.";
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] =
     useState<string | null>(null);
@@ -185,81 +224,89 @@ export default function VoiceGeneratorPage() {
     return stopPolling;
   }, [stopPolling]);
 
-  const refreshBalance = useCallback(async () => {
-    try {
-      const response = await fetch(
-        "/api/credits/balance",
-        {
-          cache: "no-store",
-        },
-      );
-
-      if (!response.ok) return;
-
-      const data = await response.json();
-
-      if (typeof data.balance === "number") {
-        setBalance(data.balance);
-      }
-    } catch {
-      // Keep the last server-reported balance.
-    }
-  }, []);
-
   /*
    * ---------------------------------------------------------
    * Load voices
    * ---------------------------------------------------------
    */
 
+  const loadAudioProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    setProviderLoadError(false);
+    try {
+      const response = await fetch("/api/models", { cache: "no-store" });
+      if (!response.ok) throw new Error("Voice catalog request failed");
+      const data = (await response.json()) as {
+        audio?: VoiceOption[];
+        audioProviders?: AudioProviderCatalog;
+      };
+      const providerCatalog = data.audioProviders ?? {};
+      const elevenLabs = providerCatalog.elevenlabs?.voices ?? data.audio ?? [];
+      const cartesia = providerCatalog.cartesia?.voices ?? [];
+      const cartesiaReady = Boolean(providerCatalog.cartesia?.configured && cartesia.length);
+      const elevenLabsReady = Boolean(providerCatalog.elevenlabs?.configured && elevenLabs.length);
+      const preferred: SpeechProvider = cartesiaReady ? "cartesia" : "elevenlabs";
+
+      setAudioProviders(providerCatalog);
+      setElevenLabsVoices(elevenLabs);
+      setCartesiaVoices(cartesia);
+      setSingleProvider((current) =>
+        current === "cartesia" ? (cartesiaReady ? current : preferred) : (elevenLabsReady ? current : preferred),
+      );
+      setDialogueProvider((current) =>
+        current === "cartesia" ? (cartesiaReady ? current : preferred) : (elevenLabsReady ? current : preferred),
+      );
+    } catch {
+      setAudioProviders({});
+      setElevenLabsVoices([]);
+      setCartesiaVoices([]);
+      setProviderLoadError(true);
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchCostsConfig()
-      .then(setCostsConfig)
-      .catch(() => setCostsConfig(null));
+    void loadAudioProviders();
+  }, [loadAudioProviders]);
 
-    fetch("/api/models", {
-      cache: "no-store",
-    })
-      .then((res) =>
-        res.ok ? res.json() : { audio: [] },
-      )
-      .then((data: { audio?: VoiceOption[] }) => {
-        const list = Array.isArray(data.audio)
-          ? data.audio
-          : [];
+  useEffect(() => {
+    const selectedVoices = selectedProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
+    if (!selectedVoices.some((voice) => voice.key === voiceId)) {
+      setVoiceId(selectedVoices[0]?.key ?? "");
+    }
+  }, [selectedProvider, cartesiaVoices, elevenLabsVoices, voiceId]);
 
-        setVoices(list);
+  useEffect(() => {
+    if (mode !== "dialogue") return;
+    const providerVoices = dialogueProvider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
+    if (!providerVoices.length) return;
 
-        if (list.length) {
-          setVoiceId((current) =>
-            current || list[0].key,
-          );
-        }
-      })
-      .catch(() => setVoices([]));
+    const voiceIds = new Set(providerVoices.map((voice) => voice.key));
+    const fallbackVoiceId = providerVoices[0].key;
+    const allowedEmotions = new Set(
+      (dialogueProvider === "cartesia" ? CARTESIA_EMOTIONS : EMOTIONS).map((emotion) => emotion.value),
+    );
 
-    void refreshBalance();
-  }, [refreshBalance]);
-
-  /*
-   * ---------------------------------------------------------
-   * Cost
-   * ---------------------------------------------------------
-   */
-
-  const feature =
-    mode === "single"
-      ? "voice_generator"
-      : "dialogue_generator";
-
-  const cost = costsConfig
-    ? computeDisplayCost(costsConfig, {
-        feature,
-        quality: "standard",
-        resolution: "1K",
-        quantity: 1,
-      })
-    : null;
+    setCharacters((current) => {
+      let changed = false;
+      const next = current.map((character) => {
+        if (voiceIds.has(character.voiceId)) return character;
+        changed = true;
+        return { ...character, voiceId: fallbackVoiceId };
+      });
+      return changed ? next : current;
+    });
+    setTurns((current) => {
+      let changed = false;
+      const next = current.map((turn) => {
+        if (!turn.emotion || allowedEmotions.has(turn.emotion)) return turn;
+        changed = true;
+        return { ...turn, emotion: "" };
+      });
+      return changed ? next : current;
+    });
+  }, [mode, dialogueProvider, cartesiaVoices, elevenLabsVoices]);
 
   const dialogueLength = turns.reduce(
     (sum, turn) =>
@@ -273,7 +320,7 @@ export default function VoiceGeneratorPage() {
 
   const dialogueValid =
     turns.length >= 2 &&
-    turns.length <= MAX_TEXT_LENGTH &&
+    turns.length <= MAX_DIALOGUE_TURNS &&
     turns.every(
       (turn) =>
         turn.text.trim() &&
@@ -281,15 +328,10 @@ export default function VoiceGeneratorPage() {
         characters.some(
           (character) =>
             character.id === turn.characterId &&
-            character.voiceId,
+            voices.some((voice) => voice.key === character.voiceId),
         ),
     ) &&
     dialogueLength <= MAX_DIALOGUE_CHARACTERS;
-
-  const hasEnoughCredits =
-    balance === null ||
-    cost === null ||
-    balance >= cost;
 
   /*
    * ---------------------------------------------------------
@@ -384,6 +426,20 @@ export default function VoiceGeneratorPage() {
         voices[0]?.key ?? "",
       ),
     ]);
+  };
+
+  const changeDialogueProvider = (provider: SpeechProvider) => {
+    setDialogueProvider(provider);
+    const nextVoices = provider === "cartesia" ? cartesiaVoices : elevenLabsVoices;
+    const availableVoiceIds = new Set(nextVoices.map((voice) => voice.key));
+    setCharacters((current) => current.map((character) => ({
+      ...character,
+      voiceId: availableVoiceIds.has(character.voiceId)
+        ? character.voiceId
+        : nextVoices[0]?.key ?? "",
+    })));
+    setAudioUrl(null);
+    setError(null);
   };
 
   /*
@@ -492,7 +548,6 @@ export default function VoiceGeneratorPage() {
             setDialogueJobId(null);
             idempotencyKeyRef.current = null;
 
-            await refreshBalance();
 
             return;
           }
@@ -507,7 +562,6 @@ export default function VoiceGeneratorPage() {
                 "Generation failed, please try again.",
             );
 
-            await refreshBalance();
 
             return;
           }
@@ -528,15 +582,13 @@ export default function VoiceGeneratorPage() {
           POLL_INTERVAL_MS,
         );
     },
-    [refreshBalance, stopPolling],
+    [stopPolling],
   );
 
   const handleGenerate = async () => {
     if (
       isBusy ||
-      dialogueJobId ||
-      !hasEnoughCredits ||
-      cost === null
+      dialogueJobId
     ) {
       return;
     }
@@ -573,9 +625,10 @@ export default function VoiceGeneratorPage() {
         );
       }
 
+      form.append("provider", singleProvider);
       form.append(
         "model",
-        "eleven_multilingual_v2",
+        singleProvider === "cartesia" ? "sonic-3.6" : "eleven_multilingual_v2",
       );
     } else {
       /*
@@ -611,10 +664,12 @@ export default function VoiceGeneratorPage() {
       );
 
       const dialogue: {
+        provider: SpeechProvider;
         inputs: typeof inputs;
         language_code?: string;
         seed?: number;
       } = {
+        provider: dialogueProvider,
         inputs,
       };
 
@@ -623,7 +678,7 @@ export default function VoiceGeneratorPage() {
           languageCode.trim();
       }
 
-      if (seed.trim()) {
+      if (dialogueProvider === "elevenlabs" && seed.trim()) {
         dialogue.seed = Number(seed);
       }
 
@@ -650,14 +705,8 @@ export default function VoiceGeneratorPage() {
         await response.json();
 
       if (response.status === 402) {
-        setBalance(
-          typeof data.balance === "number"
-            ? data.balance
-            : balance,
-        );
-
         setError(
-          "You don't have enough credits for this generation.",
+          "The generation request was rejected by the current provider or quota policy.",
         );
 
         setIsBusy(false);
@@ -703,15 +752,10 @@ export default function VoiceGeneratorPage() {
           </h1>
 
           <p className="text-sm text-muted-foreground">
-            Create a voiceover or a conversation with ElevenLabs.
+            Create voiceovers and multi-speaker dialogue with Cartesia or ElevenLabs. Each provider checks its own Free quota.
           </p>
         </div>
 
-        <div className="text-sm text-muted-foreground">
-          {balance === null
-            ? "…"
-            : `${balance} credits`}
-        </div>
       </header>
 
       <div className="grid flex-1 lg:grid-cols-[460px_1fr]">
@@ -746,6 +790,24 @@ export default function VoiceGeneratorPage() {
               {mode === "single" ? (
                 <>
                   {/* Single voice */}
+                  <label className="flex flex-col gap-1.5 text-sm font-medium">
+                    Speech provider
+
+                    <select
+                      value={singleProvider}
+                      onChange={(event) => setSingleProvider(event.target.value as SpeechProvider)}
+                      disabled={isBusy}
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal"
+                    >
+                      <option value="cartesia" disabled={!audioProviders.cartesia?.configured}>Cartesia</option>
+                      <option value="elevenlabs" disabled={!audioProviders.elevenlabs?.configured}>ElevenLabs</option>
+                    </select>
+
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Only the selected provider is used. If it is unavailable or its Free-tier checks fail, generation stops.
+                    </span>
+                  </label>
+
                   <label className="flex flex-col gap-1.5 text-sm font-medium">
                     Voice
 
@@ -815,7 +877,61 @@ export default function VoiceGeneratorPage() {
                 </>
               ) : (
                 <>
-                  {/* Language / Seed */}
+                  <label className="flex flex-col gap-1.5 text-sm font-medium">
+                    Dialogue provider
+
+                    <select
+                      value={dialogueProvider}
+                      onChange={(event) => changeDialogueProvider(event.target.value as SpeechProvider)}
+                      disabled={isBusy}
+                      className="h-10 rounded-md border bg-background px-3 text-sm font-normal"
+                    >
+                      <option value="cartesia" disabled={!audioProviders.cartesia?.configured || !cartesiaVoices.length}>
+                        Cartesia
+                      </option>
+                      <option value="elevenlabs" disabled={!audioProviders.elevenlabs?.configured || !elevenLabsVoices.length}>
+                        ElevenLabs
+                      </option>
+                    </select>
+
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Assign one voice to each speaker. The selected provider's Free quota is checked before generation.
+                    </span>
+                    {!providersLoading && (!audioProviders.elevenlabs?.configured || !elevenLabsVoices.length) && (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {elevenLabsCatalogMessage}
+                      </span>
+                    )}
+                  </label>
+
+                  {providerLoadError && (
+                    <div role="alert" className="rounded-md border border-dashed p-3 text-xs leading-5 text-muted-foreground">
+                      Could not load the voice catalog from the audio worker. Confirm it is running, then
+                      <button type="button" className="ml-1 underline" onClick={() => void loadAudioProviders()} disabled={providersLoading}>
+                        retry loading voices
+                      </button>.
+                    </div>
+                  )}
+
+                  {!providersLoading && !providerLoadError && !dialogueProviderReady && (
+                    <div role="status" className="rounded-md border border-dashed p-3 text-xs leading-5 text-muted-foreground">
+                      {dialogueProvider === "cartesia" && audioProviders.cartesia?.enabled && audioProviders.cartesia.catalogError ? (
+                        <>Cartesia is enabled, but its voice catalog could not be loaded. Retry loading voices or check the worker terminal.</>
+                      ) : dialogueProvider === "cartesia" ? (
+                        <>No Cartesia voices are available. Check <code>CARTESIA_API_KEY</code>, <code>CARTESIA_ADMIN_API_KEY</code>,
+                          <code> AUDIO_FREE_ONLY=true</code>, and <code>CARTESIA_FREE_TIER_CONFIRMED=true</code> in <code>worker/.env</code>.
+                        </>
+                      ) : audioProviders.elevenlabs?.enabled && audioProviders.elevenlabs.catalogError ? (
+                        <>ElevenLabs is enabled, but its voice catalog could not be loaded. Check that the API key is valid and review the worker terminal.</>
+                      ) : (
+                        <>No ElevenLabs voices are available. Check <code>ELEVENLABS_API_KEY</code>, <code>AUDIO_FREE_ONLY=true</code>,
+                          and <code>ELEVENLABS_FREE_TIER_CONFIRMED=true</code> in <code>worker/.env</code>.
+                        </>
+                      )} Restart the worker, then refresh this page. The provider account must be on its Free plan with paid overages disabled.
+                    </div>
+                  )}
+
+                  {/* Provider language and optional ElevenLabs seed */}
                   <div className="flex items-end gap-3">
                     <label className="flex flex-1 flex-col gap-1 text-xs font-medium">
                       Language code
@@ -836,23 +952,21 @@ export default function VoiceGeneratorPage() {
                       />
                     </label>
 
-                    <label className="flex flex-1 flex-col gap-1 text-xs font-medium">
-                      Seed (optional)
+                    {dialogueProvider === "elevenlabs" && (
+                      <label className="flex flex-1 flex-col gap-1 text-xs font-medium">
+                        Seed (optional)
 
-                      <input
-                        type="number"
-                        min="0"
-                        max="4294967295"
-                        value={seed}
-                        onChange={(event) =>
-                          setSeed(
-                            event.target.value,
-                          )
-                        }
-                        disabled={isBusy}
-                        className="h-9 rounded-md border bg-background px-2 text-sm"
-                      />
-                    </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="4294967295"
+                          value={seed}
+                          onChange={(event) => setSeed(event.target.value)}
+                          disabled={isBusy}
+                          className="h-9 rounded-md border bg-background px-2 text-sm"
+                        />
+                      </label>
+                    )}
                   </div>
 
                   {/* =====================================================
@@ -1040,6 +1154,9 @@ Omar: What happened?`}
                                   }
                                   className="h-9 w-full rounded-md border bg-background px-2 text-sm"
                                 >
+                                  {voices.length === 0 && (
+                                    <option value="">No {dialogueProvider === "cartesia" ? "Cartesia" : "ElevenLabs"} voices available</option>
+                                  )}
                                   {voices.map(
                                     (voice) => (
                                       <option
@@ -1249,7 +1366,7 @@ Omar: What happened?`}
                                   }
                                   className="mt-2 h-9 w-full rounded-md border bg-background px-2 text-sm"
                                 >
-                                  {EMOTIONS.map(
+                                  {(dialogueProvider === "cartesia" ? CARTESIA_EMOTIONS : EMOTIONS).map(
                                     (emotion) => (
                                       <option
                                         key={
@@ -1298,13 +1415,11 @@ Omar: What happened?`}
               <div className="flex flex-col gap-2 border-t pt-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Cost
+                    App credit cost
                   </span>
 
                   <span className="font-medium">
-                    {cost === null
-                      ? "Loading…"
-                      : `${cost} credits`}
+                    {`0 app credits · ${selectedProvider === "cartesia" ? "Cartesia" : "ElevenLabs"} Free quota applies`}
                   </span>
                 </div>
 
@@ -1316,8 +1431,6 @@ Omar: What happened?`}
                   disabled={
                     isBusy ||
                     dialogueJobId !== null ||
-                    cost === null ||
-                    !hasEnoughCredits ||
                     (mode === "single"
                       ? !text.trim()
                       : !dialogueValid)

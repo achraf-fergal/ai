@@ -5,7 +5,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createProject, getDefaultProject, listProjects } from "@/lib/db/queries";
 import { requireAuth } from "@/lib/auth";
-import { publicUrl } from "@/lib/worker-client";
 
 export const runtime = "nodejs";
 
@@ -22,7 +21,6 @@ export async function GET() {
     projects: projects.map((project) => ({
       id: project.id,
       name: project.name,
-      coverUrl: project.cover_path ? publicUrl(project.cover_path) : null,
       assetCount: project.asset_count,
       updatedAt: project.updated_at,
     })),

@@ -1,87 +1,31 @@
-# Variables d'environnement — pourquoi deux fichiers `.env` ?
+# Environment configuration
 
-Le dépôt contient **deux services** qui partagent la même base PostgreSQL
-mais ont des responsabilités différentes. C'est pourquoi il y a deux
-fichiers d'environnement.
+Keep provider secrets in `worker/.env` and authentication/database secrets in `web/.env`. Example files contain placeholders only. Do not commit either real `.env` file.
 
-## 1. `/web/.env.local` — Next.js (frontend + routes API)
+## Web (`web/.env`)
 
-Ce fichier ne contient **aucune clé de provider IA**. Il sert uniquement à
-connecter l'interface et les routes API Next.js à la base de données et au
-worker.
+- `DATABASE_URL`: PostgreSQL connection used by Next.js. The local Compose database is available at `127.0.0.1:5433`.
+- `WORKER_BASE_URL`: server-side worker address, normally `http://127.0.0.1:8000`.
+- `WORKER_PUBLIC_URL`: worker address reachable by the browser for saved audio playback, normally `http://127.0.0.1:8000` locally.
+- `WORKER_API_KEY`: optional shared secret; when set, it must match the worker value.
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase Auth configuration.
+- `SUPABASE_SERVICE_ROLE_KEY`: server-only key used for account deletion.
+- `NEXT_PUBLIC_APP_URL`: local app URL, normally `http://localhost:3000`.
+- `AUTH_DEBUG`: optional local development fallback. Leave disabled outside local development.
 
-```env
-NEXT_PUBLIC_APP_URL=http://192.168.1.4:3000
-DATABASE_URL=postgresql://renderstudio:renderstudio@127.0.0.1:5433/renderstudio
-WORKER_BASE_URL=http://127.0.0.1:8000
-WORKER_PUBLIC_URL=http://127.0.0.1:8000
-```
+If a local auth callback logs `permission denied for table users`, the tables may be
+owned by a different PostgreSQL role. Apply `db/local-runtime-grants.sql` to the local
+database as its owner or administrator; it grants the local `renderstudio` role access
+to the tables used by the web app and worker.
 
-- `NEXT_PUBLIC_APP_URL`: canonical public site origin. Set it to an address
-  reachable by the browser (for LAN access, use the host's LAN IP instead of
-  `localhost`); it supplies absolute URLs for auth redirects, billing, and
-  site metadata.
-- `DATABASE_URL` : Postgres partagée avec le worker.
-- `WORKER_BASE_URL` : URL interne utilisée par les routes serveur Next.js
-  pour appeler le worker (génération, upscaling, stockage).
-- `WORKER_PUBLIC_URL` : URL publique vue par le navigateur pour servir les
-  fichiers stockés par le worker (`/storage/...`).
+## Worker (`worker/.env`)
 
-## 2. `/worker/.env` — FastAPI worker (logique IA + clés providers)
+- `DATABASE_URL`: PostgreSQL connection shared with the web app.
+- `WORKER_API_KEY`: optional shared secret matching `web/.env`.
+- `STORAGE_DIR`: optional local audio storage directory. Defaults to `worker/storage`.
+- `AUDIO_FREE_ONLY=true`: required to enable guarded Free-tier audio calls.
+- `CARTESIA_API_KEY`, `CARTESIA_ADMIN_API_KEY`, and `CARTESIA_FREE_TIER_CONFIRMED=true`: Cartesia TTS, multi-speaker dialogue, and its quota check.
+- `ELEVENLABS_API_KEY` and `ELEVENLABS_FREE_TIER_CONFIRMED=true`: ElevenLabs TTS and multi-speaker dialogue.
+- `CARTESIA_DEFAULT_VOICE_ID`: optional Cartesia voice default.
 
-Ce fichier contient **toutes les clés des API officielles** des fournisseurs
-IA. Le worker est le seul service à les lire. Les routes Next.js ne parlent
-jamais directement aux providers.
-
-```env
-DATABASE_URL=postgresql://renderstudio:renderstudio@127.0.0.1:5433/renderstudio
-WORKER_PUBLIC_URL=http://127.0.0.1:8000
-
-# Providers image
-BFL_API_KEY=
-GOOGLE_API_KEY=
-OPENAI_API_KEY=
-MAGIC_HOUR_API_KEY=
-
-# Providers vidéo
-KLING_SECRET_KEY=
-RUNWAY_API_KEY=
-OPENAI_API_KEY=
-MAGIC_HOUR_API_KEY=
-
-# Audio / voix (ElevenLabs)
-ELEVENLABS_API_KEY=
-```
-
-## 3. Variables d'authentification et de facturation
-
-### `/web/.env.local`
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=         # URL du projet Supabase
-NEXT_PUBLIC_SUPABASE_ANON_KEY=    # clé publique (RLS-friendly)
-SUPABASE_SERVICE_ROLE_KEY=        # clé serveur — jamais exposée au navigateur
-STRIPE_SECRET_KEY=                # clé secrète Stripe
-STRIPE_WEBHOOK_SECRET=            # secret du endpoint webhook Stripe
-STRIPE_PRICE_STARTER=             # price ID Stripe du plan Starter
-STRIPE_PRICE_PRO=                 # price ID Stripe du plan Pro
-STRIPE_PRICE_STUDIO=              # price ID Stripe du plan Studio
-WORKER_API_KEY=                   # secret partagé /web ↔ /worker
-AUTH_DEBUG=false                  # fallback dev user si true (local only)
-NEXT_PUBLIC_SESSION_TIMEOUT_MINUTES=30  # délai d'inactivité avant déconnexion auto (minutes)
-```
-
-### `/worker/.env`
-
-```env
-WORKER_API_KEY=                   # même secret que dans /web/.env.local
-```
-
-## Règles de sécurité
-
-- Aucune variable sensible ne doit être préfixée `NEXT_PUBLIC_`.
-- Le worker est le seul service autorisé à détenir les clés providers.
-- `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY` et `WORKER_API_KEY` sont
-  réservées au serveur ; elles ne doivent jamais être lues par du code client.
-- Les fichiers `.env` et `.env.local` sont listés dans `.gitignore` et ne
-  doivent jamais être commités.
+At least one fully configured provider is required. Keep paid overages disabled in the provider account; the worker fails closed if its Free-tier checks cannot be confirmed. Audio provider credentials must never use a `NEXT_PUBLIC_` prefix.

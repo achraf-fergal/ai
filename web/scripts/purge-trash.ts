@@ -11,7 +11,7 @@ const TRASH_RETENTION_DAYS = 30;
 async function main(): Promise<void> {
   const rows = await sql<Array<{ storage_path: string }>>`
     DELETE FROM assets
-    WHERE is_trashed AND trashed_at < now() - interval '30 days'
+    WHERE type = 'audio' AND is_trashed AND trashed_at < now() - interval '30 days'
     RETURNING storage_path`;
 
   for (const row of rows) {

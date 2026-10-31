@@ -1,9 +1,12 @@
-"""Audio Jobs ElevenLabs : TTS mono-voix et dialogue structuré par le client."""
+"""Audio generation workflows with conservative free-tier provider routing."""
 import logging
+import io
+import wave
 
 import db
 import storage
-from providers import elevenlabs
+from providers import cartesia, elevenlabs
+from providers.http_helpers import ProviderError
 from workflows.common import (
     complete_job,
     consume_audio_reservation,
@@ -16,21 +19,109 @@ from workflows.common import (
 log = logging.getLogger("workflows.audio")
 
 
+def _generate_speech(input_: dict) -> dict:
+    text = input_.get("text", "")
+    requested_provider = input_.get("provider") or "elevenlabs"  # backward-compatible legacy UI
+    voice_id = input_.get("voiceId") or input_.get("voice_id")
+
+    if requested_provider == "elevenlabs":
+        return elevenlabs.generate(
+            {
+                "text": text,
+                "voice_id": voice_id or None,
+                "model_id": input_.get("model") or input_.get("model_id") or None,
+            }
+        )
+
+    if requested_provider != "cartesia":
+        raise ProviderError("unsupported speech provider")
+
+    if not cartesia.is_configured():
+        raise ProviderError("Cartesia Free is not configured")
+
+    return cartesia.generate(
+        {
+            "text": text,
+            "voice_id": voice_id or None,
+            "model_id": input_.get("model") or input_.get("model_id") or None,
+            "language": input_.get("language"),
+        }
+    )
+
+
+def _generate_cartesia_dialogue(input_: dict) -> dict:
+    """Generate each Cartesia dialogue turn, then join the compatible WAV clips."""
+    turns = input_.get("inputs") or []
+    language = input_.get("languageCode") or input_.get("language_code")
+    clips: list[bytes] = []
+    wav_format: tuple[int, int, int, str, str] | None = None
+
+    for turn in turns:
+        result = cartesia.generate(
+            {
+                "text": turn["text"],
+                "voice_id": turn["voice_id"],
+                "model_id": cartesia.DEFAULT_MODEL,
+                "language": language,
+                "emotion": turn.get("emotion"),
+            }
+        )
+        with wave.open(io.BytesIO(result["audio_bytes"]), "rb") as clip:
+            if clip.getcomptype() != "NONE":
+                raise ProviderError("Cartesia returned a compressed WAV clip")
+            current_format = (
+                clip.getnchannels(),
+                clip.getsampwidth(),
+                clip.getframerate(),
+                clip.getcomptype(),
+                clip.getcompname(),
+            )
+            if wav_format is not None and current_format != wav_format:
+                raise ProviderError("Cartesia dialogue clips used incompatible WAV formats")
+            wav_format = current_format
+            clips.append(clip.readframes(clip.getnframes()))
+
+    if not wav_format or not clips:
+        raise ProviderError("Cartesia returned no dialogue audio")
+
+    channels, sample_width, sample_rate, compression, compression_name = wav_format
+    frame_width = channels * sample_width
+    pause = b"\x00" * (int(sample_rate * 0.25) * frame_width)
+    combined = bytearray()
+    for index, clip_frames in enumerate(clips):
+        combined.extend(clip_frames)
+        if index + 1 < len(clips):
+            combined.extend(pause)
+
+    output = io.BytesIO()
+    with wave.open(output, "wb") as dialogue:
+        dialogue.setnchannels(channels)
+        dialogue.setsampwidth(sample_width)
+        dialogue.setframerate(sample_rate)
+        dialogue.setcomptype(compression, compression_name)
+        dialogue.writeframes(bytes(combined))
+
+    return {
+        "audio_bytes": output.getvalue(),
+        "mime_type": "audio/wav",
+        "model": f"{cartesia.DEFAULT_MODEL} (Cartesia dialogue)",
+        "provider": "cartesia",
+        "provider_cost_cents": 0,
+    }
+
+
 def run(job: dict) -> None:
     """Generate, store and complete an already-claimed audio job once."""
     input_ = job.get("input") or {}
     storage_path: str | None = None
     try:
         if job["type"] == "voice_generator":
-            result = elevenlabs.generate(
-                {
-                    "text": input_.get("text", ""),
-                    "voice_id": input_.get("voiceId") or None,
-                    "model_id": input_.get("model") or None,
-                }
-            )
+            result = _generate_speech(input_)
         elif job["type"] == "dialogue_generator":
-            result = elevenlabs.generate_dialogue(input_)
+            if (input_.get("provider") or "elevenlabs") == "cartesia":
+                result = _generate_cartesia_dialogue(input_)
+            else:
+                result = elevenlabs.generate_dialogue(input_)
         else:
             raise ValueError("unsupported audio job type")
 
@@ -46,9 +137,9 @@ def run(job: dict) -> None:
                     conn,
                     job,
                     asset_id,
-                    int(input_.get("creditCost") or 0),
-                    model_used=result["model"],
-                    provider_cost_cents=elevenlabs.COST_PER_GENERATION_CENTS,
+                    0,  # Free-only audio mode does not debit app credits.
+                    model_used=result.get("model"),
+                    provider_cost_cents=int(result.get("provider_cost_cents") or 0),
                 )
                 if result.get("provider_request_id"):
                     conn.execute(

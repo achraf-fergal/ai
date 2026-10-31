@@ -1,46 +1,35 @@
-// Wrapper HTTP fin vers le worker — SEUL canal entre /web et les
-// providers IA. Le worker détient TOUTE la logique de génération et les
-// clés fournisseurs ; /web crée les jobs en DB et délègue l'exécution.
-
-/** URL interne du worker — partagée avec les routes serveur. */
+// The audio worker owns generation, provider credentials, and audio storage.
 export function baseUrl(): string {
   return (process.env.WORKER_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 }
 
-const publicBaseUrl = (): string =>
+const publicBaseUrl = () =>
   (process.env.WORKER_PUBLIC_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
-/** Chemin relatif (/storage/<nom>) -> URL absolue pour le navigateur. */
 export function publicUrl(storagePath: string): string {
   return `${publicBaseUrl()}${storagePath}`;
 }
 
-/** Levée quand le worker n'a AUCUN provider configuré (les routes
- *  traduisent en 503 générique). */
 export class WorkerNotConfiguredError extends Error {
   constructor() {
-    super("worker has no provider configured");
+    super("audio worker has no provider configured");
     this.name = "WorkerNotConfiguredError";
   }
 }
 
-/** Santé/config du worker — utilisé AVANT de créer un job (503 propre). */
-export async function isWorkerConfigured(): Promise<boolean> {
-  try {
-    const res = await fetch(`${baseUrl()}/health`, { cache: "no-store" });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { providers_configured?: boolean };
-    return data.providers_configured === true;
-  } catch {
-    return false;
+export class AudioWorkerStartError extends Error {
+  constructor(readonly statusCode: number, message: string) {
+    super(message);
+    this.name = "AudioWorkerStartError";
   }
 }
 
-/** Vérifie uniquement que le worker répond ; utile aux outils sans provider IA. */
-export async function isWorkerReachable(): Promise<boolean> {
+export async function isWorkerConfigured(): Promise<boolean> {
   try {
-    const res = await fetch(`${baseUrl()}/health`, { cache: "no-store" });
-    return res.ok;
+    const response = await fetch(`${baseUrl()}/health`, { cache: "no-store" });
+    if (!response.ok) return false;
+    const data = (await response.json()) as { providers_configured?: boolean };
+    return data.providers_configured === true;
   } catch {
     return false;
   }
@@ -54,59 +43,35 @@ function workerHeaders(): Record<string, string> {
   };
 }
 
-async function postStartJob(path: string, jobId: string, bodyKey: string = "job_id"): Promise<void> {
-  const res = await fetch(`${baseUrl()}${path}`, {
+export async function startAudioJob(jobId: string): Promise<void> {
+  const response = await fetch(`${baseUrl()}/audio/generate`, {
     method: "POST",
     headers: workerHeaders(),
-    body: JSON.stringify({ [bodyKey]: jobId }),
+    body: JSON.stringify({ job_id: jobId }),
   });
-  if (res.status === 503) throw new WorkerNotConfiguredError();
-  if (!res.ok) throw new Error(`worker ${path} failed (${res.status})`);
+  if (response.status === 503) throw new WorkerNotConfiguredError();
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const payload = (await response.json()) as { detail?: unknown };
+      if (typeof payload.detail === "string") detail = payload.detail;
+    } catch {
+      // Non-JSON worker errors are mapped to a safe explanation by the route.
+    }
+    throw new AudioWorkerStartError(response.status, detail);
+  }
 }
 
-export function startImageJob(jobId: string): Promise<void> {
-  return postStartJob("/generate/image", jobId);
-}
-
-export function startVideoJob(videoJobId: string): Promise<void> {
-  return postStartJob("/generate/video", videoJobId);
-}
-
-export function startAudioJob(jobId: string): Promise<void> {
-  return postStartJob("/audio/generate", jobId);
-}
-
-export function startLipSyncJob(jobId: string): Promise<void> {
-  return postStartJob("/lip-sync/generate", jobId);
-}
-
-export function start3DGeneratorJob(jobId: string): Promise<void> {
-  return postStartJob("/3d-generator/generate", jobId);
-}
-
-export function startVideoEditJob(jobId: string): Promise<void> {
-  return postStartJob("/video/edit", jobId);
-}
-
-export function startVideoUpscaleJob(jobId: string): Promise<void> {
-  return postStartJob("/video/upscale", jobId);
-}
-
-export function startUpscaleJob(jobId: string): Promise<void> {
-  return postStartJob("/upscale", jobId);
-}
-
-/** Verse une image source chez le worker (asset réutilisable, page
- *  Uploads) et retourne son chemin public relatif. */
 export async function uploadSource(data: Buffer, mime: string): Promise<string> {
   const form = new FormData();
-  form.append("file", new Blob([new Uint8Array(data)], { type: mime }), `upload.${mime.split("/")[1] ?? "png"}`);
+  const extension = mime.split("/")[1] ?? "audio";
+  form.append("file", new Blob([new Uint8Array(data)], { type: mime }), `upload.${extension}`);
   const headers: Record<string, string> = {};
   const key = process.env.WORKER_API_KEY;
   if (key) headers["X-Worker-Key"] = key;
-  const res = await fetch(`${baseUrl()}/storage/upload`, { method: "POST", headers, body: form });
-  if (!res.ok) throw new Error(`worker /storage/upload failed (${res.status})`);
-  const payload = (await res.json()) as { path?: string };
-  if (!payload.path) throw new Error("worker /storage/upload: no path");
+  const response = await fetch(`${baseUrl()}/storage/upload`, { method: "POST", headers, body: form });
+  if (!response.ok) throw new Error(`audio worker upload failed (${response.status})`);
+  const payload = (await response.json()) as { path?: string };
+  if (!payload.path) throw new Error("audio worker upload returned no path");
   return payload.path;
 }

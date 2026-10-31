@@ -1,62 +1,65 @@
-"""Exposition des modèles disponibles pour le sélecteur UI.
+"""Expose configured audio voices without leaking provider credentials."""
+import logging
 
-Chaque feature (image/vidéo/upscale/audio) renvoie la liste des candidats
-ou capacités configurés, avec key/name/description — le client n'affiche
-QUE ces champs ; model_id et API restent internes au worker.
-"""
-from fastapi import APIRouter, HTTPException
+import httpx
+from fastapi import APIRouter
 
-from catalog import list_feature_models
-from providers import elevenlabs, upscale
+from providers import cartesia, elevenlabs
 
 router = APIRouter()
+log = logging.getLogger("routes.models")
+
+
+def _provider_catalog(name: str, provider) -> dict:
+    enabled = provider.is_configured()
+    error = None
+    try:
+        voices = provider.list_voices() if enabled else []
+    except Exception as exc:
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None and len(getattr(exc, "args", ())) > 1:
+            candidate_status = exc.args[1]
+            if isinstance(candidate_status, int):
+                status_code = candidate_status
+        if status_code in (401, 403):
+            error = "credentials_rejected"
+        elif status_code == 429:
+            error = "rate_limited"
+        elif isinstance(exc, httpx.RequestError):
+            error = "network_unavailable"
+        elif isinstance(status_code, int):
+            error = f"http_{status_code}"
+        else:
+            error = "upstream_unavailable"
+        log.warning(
+            "%s voice catalog request failed (%s, status=%s)",
+            name,
+            type(exc).__name__,
+            status_code,
+        )
+        voices = []
+    return {
+        "configured": bool(voices),
+        "enabled": enabled,
+        "catalogError": error,
+        "voices": voices,
+    }
+
+
+def audio_provider_catalog() -> dict:
+    return {
+        "cartesia": _provider_catalog("cartesia", cartesia),
+        "elevenlabs": _provider_catalog("elevenlabs", elevenlabs),
+    }
 
 
 @router.get("/models")
 def list_models() -> dict:
-    """Retourne les modèles image, vidéo, upscale et audio disponibles côté worker.
-
-    `costPerGeneration` (centimes USD réels provider) est inclus pour que le
-    front puisse estimer le coût crédits d'un modèle choisi manuellement.
-    """
-    return {
-        "image": list_feature_models("print_render", include_costs=True),
-        "background_remover": list_feature_models("background_remover", include_costs=True),
-        "video": (
-            list_feature_models("animate", include_costs=True)
-            + list_feature_models("video_to_video", include_costs=True)
-            + list_feature_models("video_relight", include_costs=True)
-        ),
-        "upscale": upscale.list_models(),
-        "audio": elevenlabs.list_voices() if elevenlabs.is_configured() else [],
-        "threed": list_feature_models("3d_generator", include_costs=True),
-    }
+    """Return only the audio catalog used by the web studio."""
+    providers = audio_provider_catalog()
+    return {"audio": providers["elevenlabs"]["voices"], "audioProviders": providers}
 
 
-@router.get("/models/{feature}")
-def list_feature(feature: str) -> list[dict]:
-    """Liste les modèles/capacités d'une feature spécifique."""
-    if feature not in {
-        "print_render",
-        "mood_swap",
-        "exterior_to_interior",
-        "plan_to_render",
-        "multi_angle",
-        "image_extender",
-        "variations",
-        "background_remover",
-        "text_to_image",
-        "animate",
-        "video_to_video",
-        "video_relight",
-        "lip_sync",
-        "upscale",
-        "audio",
-        "3d_generator",
-    }:
-        raise HTTPException(400, "unknown feature")
-    if feature == "upscale":
-        return upscale.list_models()
-    if feature == "audio":
-        return elevenlabs.list_voices() if elevenlabs.is_configured() else []
-    return list_feature_models(feature, include_costs=True)
+@router.get("/models/audio")
+def list_audio_models() -> list[dict]:
+    return audio_provider_catalog()["elevenlabs"]["voices"]

@@ -1,4 +1,4 @@
-// Polling authentifié des jobs audio ElevenLabs.
+// Authenticated polling for all audio-generation task types.
 import { NextRequest, NextResponse } from "next/server";
 
 import { getJobForUser, listAssetsForJob } from "@/lib/db/queries";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const { dbUser: user } = await requireAuth();
   const job = await getJobForUser(params.id, user.id);
-  if (!job || (job.type !== "voice_generator" && job.type !== "dialogue_generator")) {
+  if (!job || !["voice_generator", "dialogue_generator", "sound_effect_generator", "music_generator"].includes(job.type)) {
     return NextResponse.json({ error: "Job not found." }, { status: 404 });
   }
 

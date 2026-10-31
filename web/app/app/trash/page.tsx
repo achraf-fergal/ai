@@ -1,6 +1,6 @@
 "use client";
 
-// Page Trash — assets soft-deleted (is_trashed = true). Actions : Restore
+// Audio files soft-deleted (is_trashed = true). Actions: Restore
 // (remet is_trashed = false) ou Delete permanent (suppression en DB).
 // La purge automatique > 30 j est gérée par scripts/purge-trash.ts.
 import { useCallback, useEffect, useState } from "react";
@@ -34,9 +34,7 @@ export default function TrashPage() {
     <main className="flex min-h-screen w-full flex-col gap-5 p-4 sm:p-6">
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Trash</h1>
-        <p className="text-sm text-muted-foreground">
-          Deleted assets are kept for 30 days before permanent removal.
-        </p>
+        <p className="text-sm text-muted-foreground">Deleted audio is kept for 30 days before permanent removal.</p>
       </header>
 
       {error && (
@@ -54,7 +52,7 @@ export default function TrashPage() {
       ) : assets.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center">
           <p className="text-sm font-medium">Trash is empty</p>
-          <p className="text-sm text-muted-foreground">Assets you delete will appear here.</p>
+          <p className="text-sm text-muted-foreground">Audio you delete will appear here.</p>
           <Button asChild variant="outline" size="sm" className="mt-2">
             <Link href="/app/projects">Browse projects</Link>
           </Button>

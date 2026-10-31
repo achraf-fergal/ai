@@ -1,8 +1,5 @@
-// Proxy vers le worker pour la liste des modèles disponibles.
-// Le client ne connaît que key/name/description ; model_id et provider
-// restent internes au worker.
+// Public-safe proxy for the configured audio provider catalog.
 import { NextResponse } from "next/server";
-
 import { WorkerNotConfiguredError, baseUrl } from "@/lib/worker-client";
 
 export const runtime = "nodejs";
@@ -10,33 +7,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const res = await fetch(`${baseUrl()}/models`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`worker /models failed (${res.status})`);
-    const data = (await res.json()) as {
-      image?: unknown[];
-      video?: unknown[];
-      upscale?: unknown[];
-      audio?: unknown[];
-      threed?: Array<{
-        key: string;
-        name: string;
-        description: string;
-        configured: boolean;
-        supportsTextTo3d?: boolean;
-        supportsImageTo3d?: boolean;
-      }>;
-    };
+    const response = await fetch(`${baseUrl()}/models`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`worker /models failed (${response.status})`);
+    const data = (await response.json()) as { audio?: unknown[]; audioProviders?: Record<string, unknown> };
     return NextResponse.json({
-      image: Array.isArray(data.image) ? data.image : [],
-      video: Array.isArray(data.video) ? data.video : [],
-      upscale: Array.isArray(data.upscale) ? data.upscale : [],
       audio: Array.isArray(data.audio) ? data.audio : [],
-      threed: Array.isArray(data.threed) ? data.threed : [],
+      audioProviders: data.audioProviders && typeof data.audioProviders === "object" ? data.audioProviders : {},
     });
-  } catch (err) {
-    if (err instanceof WorkerNotConfiguredError) {
-      return NextResponse.json({ image: [], video: [], upscale: [], audio: [], threed: [] }, { status: 503 });
+  } catch (error) {
+    if (error instanceof WorkerNotConfiguredError) {
+      return NextResponse.json({ audio: [], audioProviders: {} }, { status: 503 });
     }
-    return NextResponse.json({ error: "Failed to load models." }, { status: 502 });
+    return NextResponse.json({ error: "Failed to load audio providers." }, { status: 502 });
   }
 }

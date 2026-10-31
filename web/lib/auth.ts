@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 import sql from "./db";
-import type { DbUser } from "./db/queries";
+import { ensureDefaultProject, type DbUser } from "./db/queries";
 
 const DEV_USER_EMAIL = "dev@renderstudio.local";
 
@@ -54,6 +54,50 @@ async function getDevUserFallback(): Promise<DbUser> {
   return rows[0];
 }
 
+export async function syncUserFromAuth(authUser: {
+  id: string;
+  email?: string;
+  user_metadata?: Record<string, unknown>;
+}): Promise<DbUser | null> {
+  const email = authUser.email ?? "";
+  const fullName = String(authUser.user_metadata?.full_name ?? "");
+  const inserted = await sql<{ id: string }[]>`
+    INSERT INTO users (id, email, display_name)
+    VALUES (${authUser.id}, ${email}, ${fullName})
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id
+  `;
+
+  const rows = await sql<DbUser[]>`
+    SELECT id, email, display_name, full_name, avatar_url
+    FROM users WHERE id = ${authUser.id} LIMIT 1
+  `;
+  const dbUser = rows[0];
+  if (!dbUser) return null;
+
+  const project = await ensureDefaultProject(authUser.id);
+  if (inserted.length > 0) {
+    const configRows = await sql<Array<{ value_int: number | null }>>`
+      SELECT value_int FROM app_config WHERE key = 'signup_bonus_credits'
+    `;
+    const bonus = configRows[0]?.value_int ?? 0;
+    if (bonus > 0) {
+      await sql`INSERT INTO credit_ledger (user_id, delta, reason) VALUES (${authUser.id}, ${bonus}, 'mint')`;
+    }
+  }
+  await sql`
+    UPDATE users SET preferences = jsonb_set(
+      COALESCE(preferences, '{}'::jsonb),
+      '{default_project_id}',
+      to_jsonb(${project.id}::text),
+      true
+    ) WHERE id = ${authUser.id}
+      AND NOT (COALESCE(preferences, '{}'::jsonb) ? 'default_project_id')
+  `;
+
+  return dbUser;
+}
+
 export async function getCurrentUser(): Promise<DbUser | null> {
   if (!hasSupabaseConfig()) {
     if (process.env.AUTH_DEBUG === "true") {
@@ -78,7 +122,14 @@ export async function getCurrentUser(): Promise<DbUser | null> {
   const rows = await sql<DbUser[]>`
     SELECT id, email, display_name, full_name, avatar_url FROM users WHERE id = ${user.id} LIMIT 1
   `;
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+
+  try {
+    return await syncUserFromAuth(user);
+  } catch (err) {
+    console.error("syncUserFromAuth failed", err);
+    return null;
+  }
 }
 
 export async function requireAuth(): Promise<{ supabaseUser: { id: string; email?: string }; dbUser: DbUser }> {
@@ -107,7 +158,14 @@ export async function requireAuth(): Promise<{ supabaseUser: { id: string; email
   const rows = await sql<DbUser[]>`
     SELECT id, email, display_name, full_name, avatar_url FROM users WHERE id = ${user.id} LIMIT 1
   `;
-  const dbUser = rows[0];
+  let dbUser = rows[0];
+  if (!dbUser) {
+    try {
+      dbUser = (await syncUserFromAuth(user)) ?? undefined;
+    } catch (err) {
+      console.error("syncUserFromAuth failed", err);
+    }
+  }
   if (!dbUser) {
     redirect("/login");
   }

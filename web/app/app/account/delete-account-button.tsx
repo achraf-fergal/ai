@@ -26,7 +26,7 @@ export function DeleteAccountButton() {
       <div className="space-y-3 rounded-md border border-destructive/50 bg-destructive/5 p-4">
         <p className="text-sm font-medium text-destructive">Are you sure?</p>
         <p className="text-sm text-muted-foreground">
-          This will permanently delete your account, projects, assets and credit history. This action cannot be undone.
+          This will permanently delete your account, audio projects, recordings, and related data. This action cannot be undone.
         </p>
         <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>

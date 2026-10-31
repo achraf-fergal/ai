@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAuth } from "@/lib/auth";
-import { computeCost } from "@/lib/credits";
 import {
   createAudioJobWithReservation,
   getDefaultProject,
@@ -11,7 +10,7 @@ import {
   InsufficientCreditsError,
   markJobFailed,
 } from "@/lib/db/queries";
-import { WorkerNotConfiguredError, isWorkerConfigured, startAudioJob } from "@/lib/worker-client";
+import { AudioWorkerStartError, WorkerNotConfiguredError, isWorkerConfigured, startAudioJob } from "@/lib/worker-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +21,12 @@ const MAX_DIALOGUE_CHARACTERS = 2000;
 const MAX_DIALOGUE_TURNS = 50;
 const MAX_UNIQUE_DIALOGUE_VOICES = 10;
 const VOICE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const MODELS = new Set(["eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_v3"]);
+const CARTESIA_DIALOGUE_EMOTIONS = new Set([
+  "neutral", "happy", "sad", "angry", "excited", "scared",
+  "surprised", "curious", "calm", "confident",
+]);
+const ELEVENLABS_MODELS = new Set(["eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_v3"]);
+const CARTESIA_MODELS = new Set(["sonic-3.6"]);
 
 function stringField(form: FormData, key: string): string | undefined {
   const value = form.get(key);
@@ -37,11 +41,13 @@ function validUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function parseDialogue(raw: string | undefined): { inputs: Record<string, string>[]; languageCode?: string; seed?: number } | null {
+function parseDialogue(raw: string | undefined): { provider: "cartesia" | "elevenlabs"; inputs: Record<string, string>[]; languageCode?: string; seed?: number } | null {
   if (!raw) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { return null; }
   if (!isRecord(parsed) || !Array.isArray(parsed.inputs) || parsed.inputs.length < 2 || parsed.inputs.length > MAX_DIALOGUE_TURNS) return null;
+  const provider = parsed.provider === undefined ? "elevenlabs" : parsed.provider;
+  if (provider !== "cartesia" && provider !== "elevenlabs") return null;
 
   const voices = new Set<string>();
   let totalLength = 0;
@@ -50,6 +56,7 @@ function parseDialogue(raw: string | undefined): { inputs: Record<string, string
     if (!isRecord(rawTurn) || typeof rawTurn.text !== "string" || !rawTurn.text.trim() || typeof rawTurn.voice_id !== "string" || !VOICE_ID.test(rawTurn.voice_id)) return null;
     const emotion = typeof rawTurn.emotion === "string" ? rawTurn.emotion.trim() : "";
     if (emotion.length > 80 || /[\[\]\r\n]/.test(emotion)) return null;
+    if (provider === "cartesia" && emotion && !CARTESIA_DIALOGUE_EMOTIONS.has(emotion)) return null;
     const turn: Record<string, string> = { text: rawTurn.text.trim(), voice_id: rawTurn.voice_id };
     if (emotion) turn.emotion = emotion;
     totalLength += turn.text.length + (emotion ? emotion.length + 3 : 0);
@@ -58,7 +65,7 @@ function parseDialogue(raw: string | undefined): { inputs: Record<string, string
   }
   if (totalLength > MAX_DIALOGUE_CHARACTERS || voices.size > MAX_UNIQUE_DIALOGUE_VOICES) return null;
 
-  const result: { inputs: Record<string, string>[]; languageCode?: string; seed?: number } = { inputs };
+  const result: { provider: "cartesia" | "elevenlabs"; inputs: Record<string, string>[]; languageCode?: string; seed?: number } = { provider, inputs };
   if (parsed.language_code !== undefined) {
     if (typeof parsed.language_code !== "string" || !/^[a-z]{2}$/i.test(parsed.language_code)) return null;
     result.languageCode = parsed.language_code.toLowerCase();
@@ -94,12 +101,18 @@ export async function POST(req: NextRequest) {
   } else if (mode === "single") {
     const text = stringField(form, "text")?.trim();
     const voiceId = stringField(form, "voiceId");
-    const model = stringField(form, "model") ?? "eleven_multilingual_v2";
-    if (!text || text.length > MAX_SINGLE_TEXT_LENGTH || (voiceId && !VOICE_ID.test(voiceId)) || !MODELS.has(model)) {
-      return NextResponse.json({ error: "Please provide valid text, voice and model values." }, { status: 400 });
+    // Backward-compatible fallback for older clients that omit provider.
+    // Current single-speech UIs explicitly submit Cartesia or ElevenLabs.
+    const provider = stringField(form, "provider") ?? "elevenlabs";
+    const model = stringField(form, "model") ?? (provider === "cartesia" ? "sonic-3.6" : "eleven_multilingual_v2");
+    const modelAllowed = provider === "cartesia"
+      ? CARTESIA_MODELS.has(model)
+      : provider === "elevenlabs" && ELEVENLABS_MODELS.has(model);
+    if (!text || text.length > MAX_SINGLE_TEXT_LENGTH || (voiceId && !VOICE_ID.test(voiceId)) || !modelAllowed) {
+      return NextResponse.json({ error: "Please provide valid text, provider, voice and model values." }, { status: 400 });
     }
     type = "voice_generator";
-    jobInput = { text, voiceId: voiceId ?? null, model };
+    jobInput = { text, voiceId: voiceId ?? null, model, provider };
   } else {
     return NextResponse.json({ error: "Unsupported audio generation mode." }, { status: 400 });
   }
@@ -110,8 +123,8 @@ export async function POST(req: NextRequest) {
   const keyHeader = req.headers.get("idempotency-key");
   if (keyHeader && !validUuid(keyHeader)) return NextResponse.json({ error: "Invalid idempotency key." }, { status: 400 });
   const idempotencyKey = keyHeader ?? randomUUID();
-  const cost = await computeCost({ feature: type, quality: "standard", resolution: "1K", quantity: 1 });
-
+  // Free audio providers are checked upstream; keep app credit cost at zero.
+  const cost = 0;
   try {
     const created = await createAudioJobWithReservation({
       userId: user.id,
@@ -131,6 +144,16 @@ export async function POST(req: NextRequest) {
       await markJobFailed(created.jobId);
       if (err instanceof WorkerNotConfiguredError) {
         return NextResponse.json({ error: "Audio generation is not configured yet — please try again later." }, { status: 503 });
+      }
+      if (err instanceof AudioWorkerStartError) {
+        const message = err.statusCode === 401 || err.statusCode === 403
+          ? "The audio worker rejected its shared key. Check WORKER_API_KEY in web/.env and worker/.env."
+          : err.statusCode === 404
+            ? "The audio worker could not find this job. Confirm web/.env and worker/.env use the same DATABASE_URL."
+            : err.statusCode >= 500
+              ? "The audio worker failed while reading the job. Check DATABASE_URL and the worker terminal."
+              : err.message || `The audio worker rejected the request (HTTP ${err.statusCode}).`;
+        return NextResponse.json({ error: message }, { status: err.statusCode === 422 ? 422 : 502 });
       }
       return NextResponse.json({ error: "Generation failed to start. You can safely retry this request." }, { status: 502 });
     }

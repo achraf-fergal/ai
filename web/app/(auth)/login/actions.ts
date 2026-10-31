@@ -151,18 +151,15 @@ export async function signUp(
     // Projet par dÃ©faut.
     const project = await createProject(user.id, "General");
 
-    // CrÃ©dits de bienvenue (configurable dans app_config).
     const configRows = await sql<Array<{ value_int: number | null }>>`
       SELECT value_int FROM app_config WHERE key = 'signup_bonus_credits'
     `;
     const bonus = configRows[0]?.value_int ?? 0;
     if (bonus > 0) {
-      await sql`
-        INSERT INTO credit_ledger (user_id, delta, reason)
-        VALUES (${user.id}, ${bonus}, 'mint')
-      `;
+      await sql`INSERT INTO credit_ledger (user_id, delta, reason) VALUES (${user.id}, ${bonus}, 'mint')`;
     }
 
+    // CrÃ©dits de bienvenue (configurable dans app_config).
     // Marque le projet par dÃ©faut comme cover initial (optionnel).
     await sql`
       UPDATE users SET preferences = jsonb_set(

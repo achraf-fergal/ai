@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CreditCard, LogOut, Settings, User } from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -58,12 +58,6 @@ export function UserMenu({ user }: UserMenuProps) {
           <Link href="/app/account" className="cursor-pointer">
             <User className="h-4 w-4" />
             Account
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/pricing" className="cursor-pointer">
-            <CreditCard className="h-4 w-4" />
-            Pricing
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

@@ -7,7 +7,6 @@ ni le protocole HTTP ni le format de transport du fournisseur.
 from __future__ import annotations
 
 import os
-import random
 import re
 import threading
 import time
@@ -28,9 +27,8 @@ MAX_DIALOGUE_TURNS = 50
 MAX_UNIQUE_DIALOGUE_VOICES = 10
 MAX_EMOTION_LENGTH = 80
 VOICE_CACHE_TTL_SECONDS = 300
-MAX_PROVIDER_ATTEMPTS = 3
 
-COST_PER_GENERATION_CENTS = 2
+COST_PER_GENERATION_CENTS = 0
 
 _AUDIO_EXTENSIONS = {
     "audio/mpeg": "mp3",
@@ -51,9 +49,122 @@ _VOICE_CACHE_LOCK = threading.Lock()
 _VOICE_CACHE: tuple[float, list[dict[str, str]]] | None = None
 
 
-def is_configured() -> bool:
-    return bool(os.environ.get("ELEVENLABS_API_KEY"))
+def _truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
+
+def is_configured() -> bool:
+    """Enabled only when the operator explicitly enables free-only audio."""
+    return (
+        bool(os.environ.get("ELEVENLABS_API_KEY"))
+        and _truthy("AUDIO_FREE_ONLY")
+        and _truthy("ELEVENLABS_FREE_TIER_CONFIRMED")
+    )
+
+
+_FREE_MONTHLY_CREDIT_CAP = 10_000
+_FREE_USAGE_LOCK = threading.Lock()
+_FREE_USAGE_LAST_SERVER_COUNT: int | None = None
+_FREE_USAGE_RESET_UNIX: int | None = None
+_FREE_USAGE_RESERVED = 0
+_FREE_USAGE_RESERVED_CHARACTERS = 0
+_FREE_USAGE_RESERVED_OTHER = 0
+
+
+def _reserve_free_credits(estimated_credits: int, *, character_metered: bool = True) -> None:
+    """Fail closed unless the account is Free and the current quota fits.
+
+    Reservations are held locally before POST because a timeout can happen
+    after the provider has started billing. The remote subscription count is
+    reconciled with local reservations on each call.
+    """
+    global _FREE_USAGE_LAST_SERVER_COUNT, _FREE_USAGE_RESET_UNIX, _FREE_USAGE_RESERVED
+    global _FREE_USAGE_RESERVED_CHARACTERS, _FREE_USAGE_RESERVED_OTHER
+    if estimated_credits < 1:
+        raise ProviderError("elevenlabs: invalid free quota estimate")
+    if not _truthy("AUDIO_FREE_ONLY"):
+        raise ProviderError("ElevenLabs generation is disabled unless AUDIO_FREE_ONLY=true")
+    if not _truthy("ELEVENLABS_FREE_TIER_CONFIRMED"):
+        raise ProviderError("ElevenLabs is disabled until its Free tier is explicitly confirmed")
+
+    try:
+        response = _CLIENT.get(
+            f"{_BASE}/user/subscription",
+            headers=_headers(),
+            timeout=20,
+        )
+    except httpx.RequestError as err:
+        raise ProviderError("ElevenLabs Free quota could not be checked; generation blocked") from err
+    if response.status_code >= 400:
+        raise _provider_error(response, "free quota check")
+    data = response.json()
+
+    if str(data.get("tier", "")).lower() != "free" or str(data.get("status", "")).lower() != "active":
+        raise ProviderError("ElevenLabs request blocked: account is not on an active Free tier")
+    overage = data.get("current_overage")
+    if not isinstance(overage, dict) or "amount" not in overage:
+        raise ProviderError("ElevenLabs overage status could not be verified; generation blocked")
+    try:
+        if float(overage["amount"]) > 0:
+            raise ProviderError("ElevenLabs request blocked because the account reports paid overage")
+    except (TypeError, ValueError) as err:
+        raise ProviderError("ElevenLabs overage status could not be verified; generation blocked") from err
+
+    # Refuse accounts configured to extend their monthly allowance through
+    # usage-based billing. Even a Free tier key must not be allowed to overage.
+    extension = data.get("max_credit_limit_extension")
+    if data.get("can_extend_character_limit") is not False or extension not in (0, "0"):
+        raise ProviderError("ElevenLabs request blocked: paid overage is not explicitly disabled")
+    if data.get("has_open_invoices") is True:
+        raise ProviderError("ElevenLabs request blocked because the account has open invoices")
+
+    count, limit = data.get("character_count"), data.get("character_limit")
+    if isinstance(count, bool) or not isinstance(count, int) or isinstance(limit, bool) or not isinstance(limit, int):
+        raise ProviderError("ElevenLabs Free quota response was incomplete; generation blocked")
+    reset_unix = data.get("next_character_count_reset_unix")
+    if reset_unix is not None and (isinstance(reset_unix, bool) or not isinstance(reset_unix, int)):
+        raise ProviderError("ElevenLabs quota reset timestamp was invalid; generation blocked")
+    if reset_unix is not None and reset_unix <= int(time.time()):
+        raise ProviderError("ElevenLabs quota reset timestamp is stale; generation blocked")
+
+    # Clear local pending reservations when the provider's billing cycle turns
+    # over—even when sound-effect requests never change character_count.
+    if _FREE_USAGE_RESET_UNIX is not None and time.time() >= _FREE_USAGE_RESET_UNIX:
+        _FREE_USAGE_LAST_SERVER_COUNT = None
+        _FREE_USAGE_RESERVED = 0
+        _FREE_USAGE_RESERVED_CHARACTERS = 0
+        _FREE_USAGE_RESERVED_OTHER = 0
+    if reset_unix is not None:
+        _FREE_USAGE_RESET_UNIX = reset_unix
+    try:
+        configured_cap = int(os.environ.get("ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT", str(_FREE_MONTHLY_CREDIT_CAP)))
+    except ValueError as err:
+        raise ProviderError("ELEVENLABS_FREE_MONTHLY_CREDIT_LIMIT must be an integer") from err
+    safe_limit = max(0, min(limit, configured_cap, _FREE_MONTHLY_CREDIT_CAP))
+
+    # Subscription counters reset at the provider's billing-cycle boundary.
+    # character_count covers TTS/dialogue; keep sound-effect credits separate
+    # so a narration count increase cannot incorrectly clear a sound reservation.
+    if _FREE_USAGE_LAST_SERVER_COUNT is not None:
+        if count < _FREE_USAGE_LAST_SERVER_COUNT:
+            _FREE_USAGE_RESERVED_CHARACTERS = 0
+            _FREE_USAGE_RESERVED_OTHER = 0
+        else:
+            newly_reported = count - _FREE_USAGE_LAST_SERVER_COUNT
+            _FREE_USAGE_RESERVED_CHARACTERS = max(0, _FREE_USAGE_RESERVED_CHARACTERS - newly_reported)
+    _FREE_USAGE_LAST_SERVER_COUNT = count
+    _FREE_USAGE_RESERVED = _FREE_USAGE_RESERVED_CHARACTERS + _FREE_USAGE_RESERVED_OTHER
+
+    if count + _FREE_USAGE_RESERVED + estimated_credits > safe_limit:
+        raise ProviderError("ElevenLabs Free monthly allowance reached; no generation request was sent")
+    # Reserve before POST. Failures/timeouts keep the estimate reserved safely.
+    # Non-TTS credit usage cannot be reconciled to character_count, so it is
+    # retained conservatively for this worker process.
+    if character_metered:
+        _FREE_USAGE_RESERVED_CHARACTERS += estimated_credits
+    else:
+        _FREE_USAGE_RESERVED_OTHER += estimated_credits
+    _FREE_USAGE_RESERVED = _FREE_USAGE_RESERVED_CHARACTERS + _FREE_USAGE_RESERVED_OTHER
 
 def _headers() -> dict[str, str]:
     return {"xi-api-key": require_env("ELEVENLABS_API_KEY")}
@@ -71,14 +182,15 @@ def _post_audio(
     payload: dict[str, Any],
     operation: str,
     timeout_s: int = 120,
+    estimated_credits: int = 1,
 ) -> dict[str, Any]:
-    """POST audio; retry only explicit transient responses/connect failures.
+    """One provider POST after preflight; never retry generation in free-only mode.
 
-    Read timeouts are not retried: ElevenLabs may have completed and billed a
-    request before the response was lost, so retrying could duplicate charges.
+    A connection timeout can occur after a request was billed, so the quota
+    is reserved before transmission and each generation request is sent once.
     """
-    last_error: Exception | None = None
-    for attempt in range(MAX_PROVIDER_ATTEMPTS):
+    with _FREE_USAGE_LOCK:
+        _reserve_free_credits(estimated_credits)
         try:
             response = _CLIENT.post(
                 url,
@@ -86,36 +198,16 @@ def _post_audio(
                 json=payload,
                 timeout=timeout_s,
             )
-        except (httpx.ConnectError, httpx.ConnectTimeout) as err:
-            last_error = err
-            if attempt + 1 == MAX_PROVIDER_ATTEMPTS:
-                break
-            time.sleep(min(2**attempt + random.random(), 4))
-            continue
         except httpx.TimeoutException as err:
             raise ProviderError(f"elevenlabs {operation} timed out; request was not retried") from err
         except httpx.RequestError as err:
             raise ProviderError(f"elevenlabs {operation} connection failed; request was not retried") from err
 
-        if response.status_code < 400:
-            if not response.content:
-                raise ProviderError(f"elevenlabs {operation}: empty response")
-            return _normalize_audio_response(response, operation)
-
-        if response.status_code not in (429, 502, 503, 504) or attempt + 1 == MAX_PROVIDER_ATTEMPTS:
+        if response.status_code >= 400:
             raise _provider_error(response, operation)
-
-        retry_after = response.headers.get("Retry-After")
-        try:
-            delay = min(max(float(retry_after or 0), 0), 5)
-        except ValueError:
-            delay = 0
-        if delay == 0:
-            delay = min(2**attempt + random.random(), 4)
-        time.sleep(delay)
-
-    raise ProviderError(f"elevenlabs {operation} connection failed after retries") from last_error
-
+        if not response.content:
+            raise ProviderError(f"elevenlabs {operation}: empty response")
+        return _normalize_audio_response(response, operation)
 
 def _normalize_audio_response(response: httpx.Response, model: str) -> dict[str, Any]:
     mime_type = response.headers.get("content-type", "audio/mpeg").split(";", 1)[0].strip().lower()
@@ -237,7 +329,11 @@ def generate(input_: dict[str, Any], timeout_s: int = 120) -> dict[str, Any]:
         {"text": text.strip(), "model_id": model},
         "text-to-speech",
         timeout_s,
+        estimated_credits=len(text.strip()),
     )
+    response_data["model"] = model
+    response_data["provider"] = "elevenlabs"
+    response_data["provider_cost_cents"] = 0
     return response_data
 
 
@@ -258,4 +354,79 @@ def generate_dialogue(input_: dict[str, Any]) -> dict[str, Any]:
             raise ProviderError("elevenlabs: seed must be between 0 and 4294967295")
         payload["seed"] = seed
 
-    return _post_audio(f"{_BASE}/text-to-dialogue", payload, "text-to-dialogue")
+    estimated_credits = sum(len(turn["text"]) for turn in inputs)
+    result = _post_audio(
+        f"{_BASE}/text-to-dialogue",
+        payload,
+        "text-to-dialogue",
+        estimated_credits=estimated_credits,
+    )
+    result["model"] = DIALOGUE_MODEL
+    result["provider"] = "elevenlabs"
+    result["provider_cost_cents"] = 0
+    return result
+
+def generate_sound_effect(input_: dict[str, Any]) -> dict[str, Any]:
+    """Generate a bounded-duration sound effect within the verified Free quota."""
+    text = input_.get("text")
+    if not isinstance(text, str) or not text.strip() or len(text.strip()) > 1000:
+        raise ProviderError("elevenlabs: sound-effect prompt must contain 1 to 1000 characters")
+    duration = input_.get("durationSeconds", input_.get("duration_seconds"))
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 0.5 <= duration <= 30:
+        raise ProviderError("elevenlabs: sound-effect duration must be between 0.5 and 30 seconds")
+    loop = input_.get("loop", False)
+    if not isinstance(loop, bool):
+        raise ProviderError("elevenlabs: loop must be a boolean")
+    # Official sound-effects guidance: 40 credits/second when duration is set.
+    estimate = int(duration * 40 + 0.999999) + len(text.strip())
+    result = _post_audio(
+        f"{_BASE}/sound-generation",
+        {
+            "text": text.strip(),
+            "duration_seconds": float(duration),
+            "loop": loop,
+            "model_id": "eleven_text_to_sound_v2",
+            "prompt_influence": 0.3,
+        },
+        "sound-generation",
+        timeout_s=120,
+        estimated_credits=estimate,
+        character_metered=False,
+    )
+    result["model"] = "eleven_text_to_sound_v2"
+    result["provider"] = "elevenlabs"
+    result["provider_cost_cents"] = 0
+    return result
+
+
+def generate_music_clip(input_: dict[str, Any]) -> dict[str, Any]:
+    """Generate a short musical loop through the Free sound-effects endpoint.
+
+    This is a max-30-second musical element/loop, not the paid full Music API.
+    """
+    prompt = input_.get("text")
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt.strip()) > 1000:
+        raise ProviderError("elevenlabs: music prompt must contain 1 to 1000 characters")
+    duration = input_.get("durationSeconds", input_.get("duration_seconds", 10))
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 5 <= duration <= 30:
+        raise ProviderError("elevenlabs: music-loop duration must be between 5 and 30 seconds")
+    estimate = int(duration * 40 + 0.999999) + len(prompt.strip())
+    result = _post_audio(
+        f"{_BASE}/sound-generation",
+        {
+            "text": prompt.strip(),
+            "duration_seconds": float(duration),
+            "loop": True,
+            "model_id": "eleven_text_to_sound_v2",
+            "prompt_influence": 0.45,
+        },
+        "music-loop generation",
+        timeout_s=120,
+        estimated_credits=estimate,
+        character_metered=False,
+    )
+    result["model"] = "eleven_text_to_sound_v2 (music loop)"
+    result["provider"] = "elevenlabs"
+    result["provider_cost_cents"] = 0
+    return result
+

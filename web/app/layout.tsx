@@ -1,7 +1,6 @@
 ﻿import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
-import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { getSiteUrl } from "@/lib/site-url";
 
@@ -19,34 +18,25 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   metadataBase: getSiteUrl(),
   title: {
-    default: "Renderuim | AI Architectural Rendering",
-    template: "%s | Renderuim",
+    default: "Audio Studio | AI Voice and Speech",
+    template: "%s | Audio Studio",
   },
   description:
-    "Create architectural renders, mood variations, alternate views, and presentation videos from your design workflow with Renderuim.",
+    "Create AI-generated speech and multi-speaker dialogue, then organize your audio in one workspace.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     type: "website",
-    siteName: "Renderuim",
-    title: "Renderuim | AI Architectural Rendering",
-    description:
-      "Create architectural renders, mood variations, alternate views, and presentation videos from your design workflow.",
+    siteName: "Audio Studio",
+    title: "Audio Studio | AI Voice and Speech",
+    description: "Create AI-generated speech and multi-speaker dialogue in one audio workspace.",
     url: "/",
-    images: [
-      {
-        url: "/hero.webp",
-        alt: "Architectural visualization created with Renderuim",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Renderuim | AI Architectural Rendering",
-    description:
-      "Create architectural renders, mood variations, alternate views, and presentation videos with Renderuim.",
-    images: ["/hero.webp"],
+    title: "Audio Studio | AI Voice and Speech",
+    description: "Create AI-generated speech and multi-speaker dialogue in one audio workspace.",
   },
 };
 
@@ -54,20 +44,10 @@ const themeInitScript = `
   (function() {
     let theme = "dark";
     try {
-      theme = localStorage.getItem("renderuim-theme") === "light" ? "light" : "dark";
+      theme = localStorage.getItem("audio-studio-theme") === "light" ? "light" : "dark";
     } catch {}
     document.documentElement.classList.remove("light", "dark");
     document.documentElement.classList.add(theme);
-    var desktop = window.matchMedia("(min-width: 768px)").matches;
-    var heroImage = desktop
-      ? (theme === "dark" ? "/hero.webp" : "/hero_white.webp")
-      : (theme === "dark" ? "/mobile_hero.webp" : "/mobile_lightmod.webp");
-    var preload = document.createElement("link");
-    preload.rel = "preload";
-    preload.as = "image";
-    preload.href = heroImage;
-    preload.setAttribute("fetchpriority", "high");
-    document.head.appendChild(preload);
   })();
 `;
 
@@ -87,7 +67,6 @@ export default function RootLayout({
         <ThemeProvider>
           {children}
         </ThemeProvider>
-        <Toaster position="bottom-right" />
       </body>
     </html>
   );

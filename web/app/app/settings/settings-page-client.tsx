@@ -59,7 +59,7 @@ function ProfileForm({ displayName, fullName }: { displayName: string; fullName:
     <Card>
       <CardHeader>
         <CardTitle>Profile</CardTitle>
-        <CardDescription>Update how your name appears across RenderStudio.</CardDescription>
+          <CardDescription>Update how your name appears in Audio Studio.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">

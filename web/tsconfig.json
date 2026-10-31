@@ -32,7 +32,6 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "components/multi-angle-camera/MultiAngleCamera.tsx",
     ".next-audit/types/**/*.ts"
   ],
   "exclude": [
