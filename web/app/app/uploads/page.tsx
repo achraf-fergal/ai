@@ -6,7 +6,6 @@ import { Upload } from "lucide-react";
 import { AssetCard, type AssetSummary } from "@/components/projects/asset-card";
 import { AssetLayoutControls, assetLayoutClass } from "@/components/projects/asset-layout-controls";
 import { useAssetLayout } from "@/components/projects/use-asset-layout";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;

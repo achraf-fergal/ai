@@ -178,7 +178,7 @@ export default function AudioStudioPage() {
         </div>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Text to Speech</h1>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Choose Cartesia or ElevenLabs for each generation. The selected provider's Free-tier checks apply. Multi-speaker dialogue
+          Choose Cartesia or ElevenLabs for each generation. The selected provider&apos;s Free-tier checks apply. Multi-speaker dialogue
           remains available in the existing Dialogue Generator.
         </p>
       </header>

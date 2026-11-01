@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
   const { dbUser: user } = await requireAuth();
   const assets = await listAssets(user.id, {
     projectId: params.get("project_id") ?? undefined,
-    type: "audio",
     favorite: params.get("favorite") === "1" ? true : undefined,
     trashed: params.get("trashed") === "1",
     uploadsOnly: params.get("uploads") === "1",

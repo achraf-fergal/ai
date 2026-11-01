@@ -895,7 +895,7 @@ export default function VoiceGeneratorPage() {
                     </select>
 
                     <span className="text-xs font-normal text-muted-foreground">
-                      Assign one voice to each speaker. The selected provider's Free quota is checked before generation.
+                      Assign one voice to each speaker. The selected provider&apos;s Free quota is checked before generation.
                     </span>
                     {!providersLoading && (!audioProviders.elevenlabs?.configured || !elevenLabsVoices.length) && (
                       <span className="text-xs font-normal text-muted-foreground">

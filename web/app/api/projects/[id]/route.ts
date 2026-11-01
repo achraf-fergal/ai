@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const { dbUser: user } = await requireAuth();
   const project = await getProject(user.id, params.id);
   if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
-  const assets = await listAssets(user.id, { projectId: project.id, type: "audio" });
+  const assets = await listAssets(user.id, { projectId: project.id });
   return NextResponse.json({
     project: { id: project.id, name: project.name },
     assets: assets.map((asset) => ({

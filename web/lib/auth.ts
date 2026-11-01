@@ -161,7 +161,8 @@ export async function requireAuth(): Promise<{ supabaseUser: { id: string; email
   let dbUser = rows[0];
   if (!dbUser) {
     try {
-      dbUser = (await syncUserFromAuth(user)) ?? undefined;
+      const syncedUser = await syncUserFromAuth(user);
+      if (syncedUser) dbUser = syncedUser;
     } catch (err) {
       console.error("syncUserFromAuth failed", err);
     }
