@@ -80,7 +80,9 @@ def validate_audio_payload(data: bytes, mime_type: str) -> None:
                 pcm = audio.readframes(frame_count)
                 if len(pcm) != expected_bytes:
                     raise ValueError("audio provider returned a truncated WAV file")
-                if not any(pcm):
+                silence_frame = b"\x80" if sample_width == 1 else b"\x00"
+                silence = silence_frame * len(pcm)
+                if pcm == silence:
                     raise ValueError("audio provider returned a silent WAV file")
         except (wave.Error, EOFError, OSError) as err:
             raise ValueError("audio provider returned an invalid WAV file") from err
@@ -97,7 +99,7 @@ def validate_audio_payload(data: bytes, mime_type: str) -> None:
         return
 
     if mime == "audio/webm":
-        if len(data) < 128 or not data.startswith(b"\\x1A\\x45\\xDF\\xA3"):
+        if len(data) < 128 or not data.startswith(bytes((0x1A, 0x45, 0xDF, 0xA3))):
             raise ValueError("audio provider returned an invalid or empty WebM file")
         return
 
