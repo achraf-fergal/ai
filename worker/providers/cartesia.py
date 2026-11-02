@@ -69,6 +69,61 @@ def _request_error(response: httpx.Response, operation: str) -> ProviderError:
     )
 
 
+
+def _normalize_wav_header(data: bytes) -> bytes:
+    """Fix streaming WAV size placeholders after the complete response is buffered.
+
+    Some byte-stream WAV responses retain 0xFFFFFFFF in the RIFF/data size
+    fields. Browsers then cannot calculate duration even though PCM bytes exist.
+    """
+    if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ProviderError("cartesia returned an invalid WAV container")
+
+    repaired = bytearray(data)
+    riff_size = int.from_bytes(repaired[4:8], "little")
+    actual_riff_size = len(repaired) - 8
+    if riff_size == 0xFFFFFFFF or riff_size > actual_riff_size:
+        repaired[4:8] = actual_riff_size.to_bytes(4, "little")
+
+    offset = 12
+    block_align: int | None = None
+    found_data = False
+
+    while offset + 8 <= len(repaired):
+        chunk_id = bytes(repaired[offset:offset + 4])
+        declared_size = int.from_bytes(repaired[offset + 4:offset + 8], "little")
+        chunk_start = offset + 8
+        available = len(repaired) - chunk_start
+
+        if chunk_id == b"fmt ":
+            if declared_size < 16 or declared_size > available:
+                raise ProviderError("cartesia returned an invalid WAV format chunk")
+            block_align = int.from_bytes(repaired[chunk_start + 12:chunk_start + 14], "little")
+            if block_align < 1:
+                raise ProviderError("cartesia returned an invalid WAV block alignment")
+
+        if chunk_id == b"data":
+            if block_align is None:
+                raise ProviderError("cartesia returned a WAV file without a valid format chunk")
+            if declared_size == 0xFFFFFFFF or declared_size > available:
+                actual_data_size = available
+                if actual_data_size < block_align or actual_data_size % block_align:
+                    raise ProviderError("cartesia returned an incomplete WAV audio payload")
+                repaired[offset + 4:offset + 8] = actual_data_size.to_bytes(4, "little")
+            elif declared_size < block_align or declared_size % block_align:
+                raise ProviderError("cartesia returned an invalid WAV data chunk")
+            found_data = True
+            break
+
+        if declared_size == 0xFFFFFFFF or declared_size > available:
+            raise ProviderError("cartesia returned an invalid WAV chunk length")
+        offset = chunk_start + declared_size + (declared_size & 1)
+
+    if not found_data:
+        raise ProviderError("cartesia returned a WAV file without an audio data chunk")
+
+    return bytes(repaired)
+
 def list_voices(force_refresh: bool = False) -> list[dict[str, str]]:
     """List active voices, caching the catalog for UI and job validation."""
     global _VOICE_CACHE
@@ -232,8 +287,9 @@ def generate(input_: dict[str, Any]) -> dict[str, Any]:
             mime_type = "audio/wav"
         if mime_type not in {"audio/wav", "audio/wave", "audio/x-wav"}:
             raise ProviderError(f"cartesia returned unsupported audio type: {mime_type}")
+        audio_bytes = _normalize_wav_header(response.content)
         return {
-            "audio_bytes": response.content,
+            "audio_bytes": audio_bytes,
             "mime_type": mime_type,
             "extension": "wav",
             "model": model,
