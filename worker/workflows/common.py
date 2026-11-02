@@ -1,5 +1,7 @@
 """Database and storage helpers shared by audio workflows."""
+import io
 import logging
+import wave
 
 import storage
 
@@ -17,9 +19,102 @@ _AUDIO_MIME_EXT = {
 }
 
 
+def _has_mpeg_audio_frame(data: bytes) -> bool:
+    """Return true when an MP3 stream contains at least one valid MPEG frame."""
+    if len(data) < 256:
+        return False
+
+    offset = 0
+    if data.startswith(b"ID3"):
+        if len(data) < 10:
+            return False
+        tag_size = (
+            ((data[6] & 0x7F) << 21)
+            | ((data[7] & 0x7F) << 14)
+            | ((data[8] & 0x7F) << 7)
+            | (data[9] & 0x7F)
+        )
+        offset = 10 + tag_size + (10 if data[5] & 0x10 else 0)
+
+    scan_end = min(len(data) - 3, offset + 65_536)
+    for index in range(offset, scan_end):
+        header = int.from_bytes(data[index:index + 4], "big")
+        if (header & 0xFFE00000) != 0xFFE00000:
+            continue
+        version = (header >> 19) & 0b11
+        layer = (header >> 17) & 0b11
+        bitrate_index = (header >> 12) & 0b1111
+        sample_rate_index = (header >> 10) & 0b11
+        if (
+            version != 0b01
+            and layer != 0
+            and bitrate_index not in (0, 0b1111)
+            and sample_rate_index != 0b11
+        ):
+            return True
+    return False
+
+
+def validate_audio_payload(data: bytes, mime_type: str) -> None:
+    """Reject empty, malformed, or silent audio before it becomes a saved asset."""
+    if not isinstance(data, bytes) or not data:
+        raise ValueError("audio provider returned an empty audio file")
+
+    mime = mime_type.split(";", 1)[0].strip().lower()
+    if mime in {"audio/wav", "audio/wave", "audio/x-wav"}:
+        try:
+            with wave.open(io.BytesIO(data), "rb") as audio:
+                channels = audio.getnchannels()
+                sample_width = audio.getsampwidth()
+                sample_rate = audio.getframerate()
+                frame_count = audio.getnframes()
+                if (
+                    audio.getcomptype() != "NONE"
+                    or channels < 1
+                    or sample_width not in (1, 2, 3, 4)
+                    or sample_rate < 1
+                    or frame_count < 1
+                ):
+                    raise ValueError("audio provider returned a WAV file with no audio frames")
+                expected_bytes = frame_count * channels * sample_width
+                pcm = audio.readframes(frame_count)
+                if len(pcm) != expected_bytes:
+                    raise ValueError("audio provider returned a truncated WAV file")
+                if not any(pcm):
+                    raise ValueError("audio provider returned a silent WAV file")
+        except (wave.Error, EOFError, OSError) as err:
+            raise ValueError("audio provider returned an invalid WAV file") from err
+        return
+
+    if mime in {"audio/mpeg", "audio/mp3"}:
+        if not _has_mpeg_audio_frame(data):
+            raise ValueError("audio provider returned an invalid or empty MP3 file")
+        return
+
+    if mime == "audio/ogg":
+        if len(data) < 128 or not data.startswith(b"OggS"):
+            raise ValueError("audio provider returned an invalid or empty OGG file")
+        return
+
+    if mime == "audio/webm":
+        if len(data) < 128 or not data.startswith(b"\\x1A\\x45\\xDF\\xA3"):
+            raise ValueError("audio provider returned an invalid or empty WebM file")
+        return
+
+    if mime == "audio/mp4":
+        header = data[:64]
+        if len(data) < 256 or b"ftyp" not in header or b"mdat" not in data:
+            raise ValueError("audio provider returned an invalid or empty MP4 audio file")
+        return
+
+    raise ValueError(f"unsupported audio MIME type: {mime}")
+
+
 def _client_failure_message(err: Exception) -> str:
     """Map provider errors to actionable, non-sensitive user messages."""
     message = str(err).lower()
+    if any(marker in message for marker in ("empty audio", "silent wav", "invalid wav", "invalid or empty mp3", "truncated wav", "no audio frames", "invalid or empty ogg", "invalid or empty webm", "invalid or empty mp4")):
+        return "The provider returned an empty, silent, or invalid audio file. No audio asset was saved; try again or select another provider."
     if "user_read" in message and any(
         marker in message for marker in ("missing_permissions", "missing permission", "lacks permission")
     ):
@@ -58,8 +153,7 @@ def store_audio_output(data: bytes, mime_type: str) -> tuple[str, str]:
     extension = _AUDIO_MIME_EXT.get(mime)
     if not extension or not mime.startswith("audio/"):
         raise ValueError(f"unsupported audio MIME type: {mime}")
-    if not data:
-        raise ValueError("audio provider returned an empty file")
+    validate_audio_payload(data, mime)
     return storage.save_file(data, extension), extension
 
 

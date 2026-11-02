@@ -78,8 +78,17 @@ def _generate_cartesia_dialogue(input_: dict) -> dict:
             )
             if wav_format is not None and current_format != wav_format:
                 raise ProviderError("Cartesia dialogue clips used incompatible WAV formats")
+            frame_count = clip.getnframes()
+            if frame_count < 1:
+                raise ProviderError("Cartesia returned a dialogue turn with no audio frames")
+            frames = clip.readframes(frame_count)
+            expected_bytes = frame_count * clip.getnchannels() * clip.getsampwidth()
+            if len(frames) != expected_bytes:
+                raise ProviderError("Cartesia returned a truncated dialogue WAV clip")
+            if not any(frames):
+                raise ProviderError("Cartesia returned a silent dialogue WAV clip")
             wav_format = current_format
-            clips.append(clip.readframes(clip.getnframes()))
+            clips.append(frames)
 
     if not wav_format or not clips:
         raise ProviderError("Cartesia returned no dialogue audio")

@@ -18,9 +18,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (job.status === "complete") {
     const assets = await listAssetsForJob(job.id);
     const asset = assets[0];
+    if (!asset?.storage_path) {
+      return NextResponse.json({
+        status: "failed",
+        error: "The job completed without a stored audio file. Check the worker storage and asset records.",
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
     return NextResponse.json({
       status: "complete",
-      resultUrl: asset ? publicUrl(asset.storage_path) : null,
+      resultUrl: publicUrl(asset.storage_path),
       assetId: asset?.id ?? null,
       creditsCharged: job.credits_charged,
     }, { headers: { "Cache-Control": "no-store" } });

@@ -21,7 +21,7 @@ from providers.http_helpers import ProviderError, require_env
 
 _BASE = "https://api.cartesia.ai"
 _VERSION = os.environ.get("CARTESIA_VERSION", "2026-08-14")
-_USAGE_VERSION = _VERSION
+_USAGE_VERSION = "2026-03-01"
 DEFAULT_MODEL = "sonic-3.6"
 MAX_TEXT_LENGTH = 5000
 PUBLISHED_FREE_MONTHLY_CREDITS = 20_000

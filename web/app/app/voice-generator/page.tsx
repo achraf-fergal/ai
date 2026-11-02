@@ -541,14 +541,19 @@ export default function VoiceGeneratorPage() {
           const data = await response.json();
 
           if (data.status === "complete") {
+            const resultUrl =
+              typeof data.resultUrl === "string" ? data.resultUrl.trim() : "";
             setIsBusy(false);
-            setAudioUrl(
-              data.resultUrl ?? null,
-            );
             setDialogueJobId(null);
             idempotencyKeyRef.current = null;
 
+            if (!resultUrl) {
+              setAudioUrl(null);
+              setError("The job completed but no audio file URL was returned. Check the worker storage and asset records.");
+              return;
+            }
 
+            setAudioUrl(resultUrl);
             return;
           }
 
@@ -1497,6 +1502,11 @@ Omar: What happened?`}
               <audio
                 src={audioUrl}
                 controls
+                preload="metadata"
+                onError={() => {
+                  setAudioUrl(null);
+                  setError("The generated audio file could not be loaded. Check WORKER_PUBLIC_URL and the worker /storage route.");
+                }}
                 className="w-full"
               />
             </div>

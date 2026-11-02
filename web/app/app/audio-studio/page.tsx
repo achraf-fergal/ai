@@ -148,10 +148,10 @@ export default function AudioStudioPage() {
         const result = await pollResponse.json();
         if (!pollResponse.ok) throw new Error(result.error ?? "Could not check generation status.");
         if (result.status === "complete") {
-          if (typeof result.resultUrl !== "string") {
+          if (typeof result.resultUrl !== "string" || !result.resultUrl.trim()) {
             throw new Error("The job completed but no audio URL was returned.");
           }
-          setAudioUrl(result.resultUrl);
+          setAudioUrl(result.resultUrl.trim());
           setAssetId(typeof result.assetId === "string" ? result.assetId : null);
           setStatus("complete");
           setMessage("Speech saved in your existing project storage.");
@@ -283,7 +283,17 @@ export default function AudioStudioPage() {
           {status === "complete" && audioUrl && (
             <div className="space-y-3 rounded-xl border p-4">
               <div className="font-medium">Generated speech</div>
-              <audio controls preload="metadata" src={audioUrl} className="w-full" />
+              <audio
+                controls
+                preload="metadata"
+                src={audioUrl}
+                onError={() => {
+                  setStatus("failed");
+                  setMessage("");
+                  setError("The generated audio file could not be loaded. Check WORKER_PUBLIC_URL and the worker /storage route.");
+                }}
+                className="w-full"
+              />
               {assetId && <p className="text-xs text-muted-foreground">Saved asset ID: {assetId}</p>}
             </div>
           )}
