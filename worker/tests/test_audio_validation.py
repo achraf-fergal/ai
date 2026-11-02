@@ -3,6 +3,7 @@ import io
 import wave
 import unittest
 
+from providers.cartesia import _normalize_wav_header
 from workflows.common import validate_audio_payload
 
 
@@ -20,6 +21,20 @@ class AudioPayloadValidationTests(unittest.TestCase):
     def test_accepts_non_silent_pcm_wav(self):
         pcm = b"".join((value).to_bytes(2, "little", signed=True) for value in (100, -100, 250, -250) * 500)
         validate_audio_payload(make_wav(pcm), "audio/wav")
+
+
+    def test_repairs_cartesia_streaming_wav_size_placeholders(self):
+        pcm = b"".join((value).to_bytes(2, "little", signed=True) for value in (100, -100, 250, -250) * 500)
+        streaming_wav = bytearray(make_wav(pcm))
+        streaming_wav[4:8] = (0xFFFFFFFF).to_bytes(4, "little")
+        streaming_wav[40:44] = (0xFFFFFFFF).to_bytes(4, "little")
+
+        repaired = _normalize_wav_header(bytes(streaming_wav))
+        validate_audio_payload(repaired, "audio/wav")
+
+        with wave.open(io.BytesIO(repaired), "rb") as audio:
+            self.assertEqual(audio.getnframes(), len(pcm) // 2)
+            self.assertAlmostEqual(audio.getnframes() / audio.getframerate(), len(pcm) / 44100, places=3)
 
     def test_rejects_wav_with_no_frames(self):
         with self.assertRaisesRegex(ValueError, "no audio frames"):
